@@ -15,8 +15,26 @@ class LeetCodeForcerService : AccessibilityService() {
         private const val TAG = "LeetCodeForcer"
 
         private val WHITELIST_PACKAGES = setOf(
+            "com.google.android.keep",
+            "com.focus.mobile.focus",
+            "cc.forestapp",
+            "droom.sleepIfUCan",
+            "org.brilliant.android",
+            "app.getatoms.android",
+            "com.anthropic.claude",
+            "com.phonepe.app",
+            "com.miui.securitycenter",
+            "com.miui.powerkeeper",
+            "com.miui.cleanmaster",
+            "miui.systemui.plugin",
+            "com.google.android.packageinstaller",
+            "com.miui.home",
+            "com.android.settings",
+            "com.android.systemui",
+            "com.android.settingsaccessibility",
+            "com.google.android.inputmethod.latin",
             "com.mi.globalminusscreen",
-            "com.android.chrome",
+           
             "com.android.settings",
             "com.android.systemui",
             "com.google.android.apps.nexuslauncher",
@@ -24,8 +42,18 @@ class LeetCodeForcerService : AccessibilityService() {
             "com.example.leetcodeforcer",
             "com.miui.home",
             "miui.systemui.plugin",
-            "com.android.vending", // Play Store (to update apps?)
-            "com.google.android.gm" // Gmail
+           "com.google.android.apps.docs.editors.docs",
+           "com.google.android.apps.docs.editors.sheets",
+           "com.google.android.apps.docs.editors.slides",
+            "com.google.android.gm" ,
+            "notion.id",
+            "com.example.peedo",
+            "ai.x.grok",
+            "com.wlxd.pomochallenge",
+            "com.google.android.apps.messaging",
+           "com.google.android.apps.bard"
+
+            
         )
     }
 
@@ -72,8 +100,14 @@ class LeetCodeForcerService : AccessibilityService() {
         if (WHITELIST_PACKAGES.contains(pkg)) return true
         // Allow launchers generally (simple heuristic: contains launcher)
         if (pkg.contains("launcher")) return true
+       if (pkg.contains("calendar")) return true;
+       if (pkg.contains("home")) return true;
+       if (pkg.contains("plan")) return true;
+       if (pkg.contains("dialer")) return true;
+       if (pkg.contains("contacts")) return true;
         // Allow system UI elements specifically
         if (pkg.contains("systemui")) return true
+        if (pkg.contains("plan")) return true
 
         if(pkg.contains("com.miui.home")) return true;
         if(pkg.contains("settings")) return true;
