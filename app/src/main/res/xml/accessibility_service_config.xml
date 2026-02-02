@@ -5,6 +5,4 @@
     android:accessibilityFlags="flagIncludeNotImportantViews"
     android:accessibilityFeedbackType="feedbackGeneric"
     android:notificationTimeout="100"
-    android:canRetrieveWindowContent="true"
-   
-    android:settingsActivity="com.example.leetcodeforcer.MainActivity" />
+    android:canRetrieveWindowContent="true" />
