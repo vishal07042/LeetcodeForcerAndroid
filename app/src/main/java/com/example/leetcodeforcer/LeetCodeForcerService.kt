@@ -15,6 +15,7 @@ class LeetCodeForcerService : AccessibilityService() {
         private const val TAG = "LeetCodeForcer"
 
         private val WHITELIST_PACKAGES = setOf(
+            "com.miui.securityadd",
             "com.google.android.keep",
             "com.focus.mobile.focus",
             "cc.forestapp",
@@ -86,6 +87,10 @@ class LeetCodeForcerService : AccessibilityService() {
         if (!isPackageAllowed(packageName)) {
             Log.w(TAG, "BLOCKING: $packageName (Reason: LeetCode not solved for today)")
             performGlobalAction(GLOBAL_ACTION_BACK)
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            performGlobalAction(GLOBAL_ACTION_HOME)
+
+
             
             // Show toast
             Toast.makeText(this, "LeetCode Forcer: Solve a problem first!", Toast.LENGTH_SHORT).show()
