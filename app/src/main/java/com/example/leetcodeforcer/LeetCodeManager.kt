@@ -163,7 +163,7 @@ object LeetCodeManager {
         return if (solved) {
             "${uniqueMsg}Status: [ COMPLETED ]\nYou are free for today!"
         } else {
-            "${uniqueMsg}Status: [ PENDING ]\nGoal: Get ONE more accepted."
+            "${uniqueMsg}Status: [ PENDING ]\nGoal: Solve one problem to unlock."
         }
     }
 
@@ -176,6 +176,41 @@ object LeetCodeManager {
     }
 
     private fun getTodayDateString(): String {
+        return try {
+            val apiUrl = URL("http://worldclockapi.com/api/json/utc/now")
+            val conn = apiUrl.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.connectTimeout = 5000 // 5 seconds timeout
+            conn.readTimeout = 5000
+            
+            val responseCode = conn.responseCode
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                val response = conn.inputStream.bufferedReader().use { it.readText() }
+                val jsonResponse = JSONObject(response)
+                
+                // Parse the currentDateTime field (format: "2024-01-15T12:30:45Z")
+                val currentDateTime = jsonResponse.getString("currentDateTime")
+                
+                // Extract date portion and convert to YYYY-M-D format
+                val datePart = currentDateTime.split("T")[0] // Gets "2024-01-15"
+                val dateParts = datePart.split("-")
+                val year = dateParts[0]
+                val month = dateParts[1].toInt() // Remove leading zero
+                val day = dateParts[2].toInt() // Remove leading zero
+                
+                Log.d(TAG, "Fetched date from World Clock API: $year-$month-$day")
+                "$year-$month-$day"
+            } else {
+                Log.e(TAG, "World Clock API returned error code: $responseCode. Falling back to local time.")
+                getFallbackDateString()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch date from World Clock API: ${e.message}. Falling back to local time.", e)
+            getFallbackDateString()
+        }
+    }
+    
+    private fun getFallbackDateString(): String {
         val calendar = Calendar.getInstance()
         return "${calendar.get(Calendar.YEAR)}-${calendar.get(Calendar.MONTH) + 1}-${calendar.get(Calendar.DAY_OF_MONTH)}"
     }
