@@ -15,6 +15,7 @@ class LeetCodeForcerService : AccessibilityService() {
         private const val TAG = "LeetCodeForcer"
 
         private val WHITELIST_PACKAGES = setOf(
+            "com.whatsapp",
             "com.miui.securityadd",
             "com.google.android.keep",
             "com.focus.mobile.focus",
@@ -72,28 +73,19 @@ class LeetCodeForcerService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Optimization: if already solved, do NOTHING. Don't even read the package name.
-        val isSolved = LeetCodeManager.isSolvedToday(this)
-        
-        if (isSolved) {
-            // Logs once in a while or just stay silent? Let's log once to confirm it's idle.
-            return
-        }
+        // Unlock only when BOTH LeetCode task and Brilliant (30 min) are done.
+        val isUnlocked = LeetCodeManager.isSolvedToday(this) && isBrilliantTaskDone(this)
+        if (isUnlocked) return
 
         if (event == null || event.packageName == null) return
-        
         val packageName = event.packageName.toString()
 
         if (!isPackageAllowed(packageName)) {
-            Log.w(TAG, "BLOCKING: $packageName (Reason: LeetCode not solved for today)")
+            Log.w(TAG, "BLOCKING: $packageName (Complete LeetCode + Brilliant 30 min to unlock)")
             performGlobalAction(GLOBAL_ACTION_BACK)
             performGlobalAction(GLOBAL_ACTION_HOME)
             performGlobalAction(GLOBAL_ACTION_HOME)
-
-
-            
-            // Show toast
-            Toast.makeText(this, "LeetCode Forcer: Solve a problem first!", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Complete LeetCode + Brilliant (30 min) to unlock!", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -104,6 +96,9 @@ class LeetCodeForcerService : AccessibilityService() {
     private fun isPackageAllowed(pkg: String): Boolean {
         if (WHITELIST_PACKAGES.contains(pkg)) return true
         // Allow launchers generally (simple heuristic: contains launcher)
+
+
+        if (pkg.contains("tasker")) return true
         if (pkg.contains("launcher")) return true
        if (pkg.contains("calendar")) return true;
        if (pkg.contains("home")) return true;

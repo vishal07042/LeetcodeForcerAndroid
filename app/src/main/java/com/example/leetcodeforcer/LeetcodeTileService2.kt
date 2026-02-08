@@ -26,39 +26,37 @@ class LeetCodeTileServiceShowStats : TileService() {
         tile.label = "Checking..."
         tile.updateTile()
 
-        Toast.makeText(applicationContext, "Checking stats...", Toast.LENGTH_SHORT).show()
+        Toast.makeText(applicationContext, "Checking LeetCode & Brilliant...", Toast.LENGTH_SHORT).show()
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                Log.d(TAG, "Coroutine started. Fetching status...")
-                val isSolved = LeetCodeManager.checkAndSaveStatus(applicationContext)
-                Log.d(TAG, "Status fetched. Solved: $isSolved")
-                
+                Log.d(TAG, "Fetching LeetCode and Brilliant status...")
+                val lcSolved = LeetCodeManager.checkAndSaveStatus(applicationContext)
+                val brilliantDone = isBrilliantTaskDone(applicationContext)
+                val isUnlocked = lcSolved && brilliantDone
+                Log.d(TAG, "LC solved: $lcSolved, Brilliant done: $brilliantDone -> unlocked: $isUnlocked")
+
                 withContext(Dispatchers.Main) {
-                    updateTileState(isSolved)
-                    
-                    // Construct the full status message
+                    updateTileState(isUnlocked)
+
                     val isServiceEnabled = isAccessibilityServiceEnabled()
                     val serviceStatusMsg = if (isServiceEnabled) "Service: ACTIVE" else "Service: INACTIVE"
                     val blockingMsg = if (!isServiceEnabled) "\n(Blocking disabled)" else ""
-                    
+
                     val lcStatus = LeetCodeManager.getDetailedStatus(applicationContext)
-                    
-                    val fullMessage = "$serviceStatusMsg$blockingMsg\n\n$lcStatus"
-                    Log.d(TAG, "Displaying Dialog: $fullMessage")
-                    
+                    val brilliantStatus = getBrilliantStatusMessage(applicationContext)
+                    val fullMessage = "$serviceStatusMsg$blockingMsg\n\n$lcStatus\n\n$brilliantStatus"
+
                     try {
                         val dialog = android.app.AlertDialog.Builder(this@LeetCodeTileServiceShowStats)
-                            .setTitle("LeetCode Stats")
+                            .setTitle("LeetCode & Brilliant")
                             .setMessage(fullMessage)
                             .setPositiveButton("OK", null)
                             .create()
-                        
                         showDialog(dialog)
                     } catch (e: Exception) {
-                         Log.e(TAG, "Error showing dialog", e)
-                         // Fallback to Toast if dialog fails (though unlikely if suppression is the only issue)
-                         Toast.makeText(applicationContext, fullMessage, Toast.LENGTH_LONG).show()
+                        Log.e(TAG, "Error showing dialog", e)
+                        Toast.makeText(applicationContext, fullMessage, Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
@@ -72,20 +70,20 @@ class LeetCodeTileServiceShowStats : TileService() {
 
     override fun onStartListening() {
         super.onStartListening()
-        // Update UI when tile becomes visible
-        val solvedToday = LeetCodeManager.isSolvedToday(applicationContext)
-        updateTileState(solvedToday)
+        val lcSolved = LeetCodeManager.isSolvedToday(applicationContext)
+        val brilliantDone = isBrilliantTaskDone(applicationContext)
+        updateTileState(lcSolved && brilliantDone)
     }
 
-    private fun updateTileState(isSolved: Boolean) {
+    private fun updateTileState(isUnlocked: Boolean) {
         val tile = qsTile ?: return
-        if (isSolved) {
+        if (isUnlocked) {
             tile.state = Tile.STATE_ACTIVE
-            tile.label = "LC Solved"
+            tile.label = "LC + Brilliant"
             tile.subtitle = "Unblocked"
         } else {
             tile.state = Tile.STATE_INACTIVE
-            tile.label = "Check LC"
+            tile.label = "Check LC+Brilliant"
             tile.subtitle = "Blocked"
         }
         tile.updateTile()
