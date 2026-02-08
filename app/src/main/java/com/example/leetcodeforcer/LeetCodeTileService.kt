@@ -22,6 +22,7 @@ class LeetCodeTileService : TileService() {
         Toast.makeText(this, "Checking LeetCode stats...", Toast.LENGTH_SHORT).show()
 
         CoroutineScope(Dispatchers.IO).launch {
+            LeetCodeManager.refreshDateFromApiIfNeeded(applicationContext)
             val isSolved = LeetCodeManager.checkAndSaveStatus(applicationContext)
             
             withContext(Dispatchers.Main) {

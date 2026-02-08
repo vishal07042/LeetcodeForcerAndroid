@@ -18,6 +18,10 @@ object LeetCodeManager {
     private const val KEY_LAST_SOLVED_DATE = "todayDateAfterChallenegeComplete"
     private const val KEY_NUM_SUBMISSIONS = "numSubmissions"
     private const val KEY_UNIQUE_SOLVED = "uniqueSolved"
+    private const val KEY_CACHED_UTC_DATE = "cached_utc_date"
+    private const val KEY_CACHED_UTC_DATE_AT = "cached_utc_date_at"
+    private const val DATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000L // 24 hours — date changes once per day
+    private const val TIME_API_URL = "https://gettimeapi.dev/v1/time"
 
     private const val LEETCODE_ALL_PROBLEMS_QUERY = """
         query userSessionProgress(${"$"}username: String!) {
@@ -36,7 +40,7 @@ object LeetCodeManager {
     fun isSolvedToday(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val lastSolvedDate = prefs.getString(KEY_LAST_SOLVED_DATE, null)
-        val today = getTodayDateString()
+        val today = getTodayDateString(context)
         return lastSolvedDate == today
     }
 
@@ -170,46 +174,59 @@ object LeetCodeManager {
     private fun markSolvedToday(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit()
-            .putString(KEY_LAST_SOLVED_DATE, getTodayDateString())
+            .putString(KEY_LAST_SOLVED_DATE, getTodayDateString(context))
             .apply()
         Log.i(TAG, "Marked as solved for today!")
     }
 
-    private fun getTodayDateString(): String {
-        return try {
-            val apiUrl = URL("http://worldclockapi.com/api/json/utc/now")
-            val conn = apiUrl.openConnection() as HttpURLConnection
+    /**
+     * Fetches current UTC date from API and saves to SharedPreferences.
+     * Call this when user clicks the tile. Only fetches if cache is empty or older than 24 hours.
+     */
+    fun refreshDateFromApiIfNeeded(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val cachedAt = prefs.getLong(KEY_CACHED_UTC_DATE_AT, 0L)
+        if (cachedAt > 0L && (System.currentTimeMillis() - cachedAt) < DATE_CACHE_TTL_MS) {
+            Log.v(TAG, "Date cache still valid, skipping API fetch")
+            return
+        }
+        try {
+            val conn = URL(TIME_API_URL).openConnection() as HttpURLConnection
             conn.requestMethod = "GET"
-            conn.connectTimeout = 5000 // 5 seconds timeout
+            conn.connectTimeout = 5000
             conn.readTimeout = 5000
-            
             val responseCode = conn.responseCode
             if (responseCode == HttpURLConnection.HTTP_OK) {
                 val response = conn.inputStream.bufferedReader().use { it.readText() }
-                val jsonResponse = JSONObject(response)
-                
-                // Parse the currentDateTime field (format: "2024-01-15T12:30:45Z")
-                val currentDateTime = jsonResponse.getString("currentDateTime")
-                
-                // Extract date portion and convert to YYYY-M-D format
-                val datePart = currentDateTime.split("T")[0] // Gets "2024-01-15"
-                val dateParts = datePart.split("-")
-                val year = dateParts[0]
-                val month = dateParts[1].toInt() // Remove leading zero
-                val day = dateParts[2].toInt() // Remove leading zero
-                
-                Log.d(TAG, "Fetched date from World Clock API: $year-$month-$day")
-                "$year-$month-$day"
-            } else {
-                Log.e(TAG, "World Clock API returned error code: $responseCode. Falling back to local time.")
-                getFallbackDateString()
+                val json = JSONObject(response)
+                val date = json.optString("date", "")
+                if (date.isNotBlank()) {
+                    Log.d(TAG, "Fetched date from gettimeapi.dev: $date (saved to SharedPreferences)")
+                    prefs.edit()
+                        .putString(KEY_CACHED_UTC_DATE, date)
+                        .putLong(KEY_CACHED_UTC_DATE_AT, System.currentTimeMillis())
+                        .apply()
+                    return
+                }
             }
+            Log.e(TAG, "Time API returned $responseCode or empty date.")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to fetch date from World Clock API: ${e.message}. Falling back to local time.", e)
-            getFallbackDateString()
+            Log.e(TAG, "Failed to fetch date from Time API: ${e.message}", e)
         }
     }
-    
+
+    /** Returns today's date string (UTC). Uses cached value from SharedPreferences; never hits the API. */
+    private fun getTodayDateString(context: Context): String {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val cachedDate = prefs.getString(KEY_CACHED_UTC_DATE, null)
+        val cachedAt = prefs.getLong(KEY_CACHED_UTC_DATE_AT, 0L)
+        if (cachedDate != null && cachedAt > 0L && (System.currentTimeMillis() - cachedAt) < DATE_CACHE_TTL_MS) {
+            Log.v(TAG, "Using cached date: $cachedDate")
+            return cachedDate
+        }
+        return getFallbackDateString()
+    }
+
     private fun getFallbackDateString(): String {
         val calendar = Calendar.getInstance()
         return "${calendar.get(Calendar.YEAR)}-${calendar.get(Calendar.MONTH) + 1}-${calendar.get(Calendar.DAY_OF_MONTH)}"

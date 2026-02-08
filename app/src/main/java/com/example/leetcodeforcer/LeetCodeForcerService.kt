@@ -15,6 +15,8 @@ class LeetCodeForcerService : AccessibilityService() {
         private const val TAG = "LeetCodeForcer"
 
         private val WHITELIST_PACKAGES = setOf(
+            "com.google.android.gms",
+            "com.android.vending",
             "com.whatsapp",
             "com.miui.securityadd",
             "com.google.android.keep",

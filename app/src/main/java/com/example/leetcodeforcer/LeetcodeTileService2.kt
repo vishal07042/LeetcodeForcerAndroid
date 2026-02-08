@@ -30,6 +30,7 @@ class LeetCodeTileServiceShowStats : TileService() {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                LeetCodeManager.refreshDateFromApiIfNeeded(applicationContext)
                 Log.d(TAG, "Fetching LeetCode and Brilliant status...")
                 val lcSolved = LeetCodeManager.checkAndSaveStatus(applicationContext)
                 val brilliantDone = isBrilliantTaskDone(applicationContext)
