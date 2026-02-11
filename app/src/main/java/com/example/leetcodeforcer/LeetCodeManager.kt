@@ -227,6 +227,12 @@ object LeetCodeManager {
         return getFallbackDateString()
     }
 
+    fun resetProgress(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().clear().apply()
+        Log.i(TAG, "LeetCode progress reset successfully!")
+    }
+
     private fun getFallbackDateString(): String {
         val calendar = Calendar.getInstance()
         return "${calendar.get(Calendar.YEAR)}-${calendar.get(Calendar.MONTH) + 1}-${calendar.get(Calendar.DAY_OF_MONTH)}"

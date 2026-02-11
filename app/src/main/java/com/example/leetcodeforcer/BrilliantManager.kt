@@ -10,7 +10,7 @@ import android.provider.Settings
 import android.app.usage.UsageStatsManager.INTERVAL_DAILY
 import java.util.Calendar
 
-const val MIN_BRILLIANT_MINUTES = 30L
+const val MIN_BRILLIANT_MINUTES = 10L
 
 fun hasUsageStatsPermission(context: Context): Boolean {
     val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager

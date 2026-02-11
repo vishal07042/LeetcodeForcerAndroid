@@ -100,7 +100,7 @@ class LeetCodeForcerService : AccessibilityService() {
         // Allow launchers generally (simple heuristic: contains launcher)
 
 
-        if (pkg.contains("tasker")) return true
+//        if (pkg.contains("tasker")) return true
         if (pkg.contains("launcher")) return true
        if (pkg.contains("calendar")) return true;
        if (pkg.contains("home")) return true;
@@ -110,6 +110,7 @@ class LeetCodeForcerService : AccessibilityService() {
         // Allow system UI elements specifically
         if (pkg.contains("systemui")) return true
         if (pkg.contains("plan")) return true
+        if(pkg.contains("medium")) return true
 
         if(pkg.contains("com.miui.home")) return true;
         if(pkg.contains("settings")) return true;
