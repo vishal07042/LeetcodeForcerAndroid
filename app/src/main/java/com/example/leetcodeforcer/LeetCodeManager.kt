@@ -16,6 +16,7 @@ object LeetCodeManager {
 
     private const val PREFS_NAME = "leet_prefs"
     private const val KEY_LAST_SOLVED_DATE = "todayDateAfterChallenegeComplete"
+    private const val KEY_LAST_SOLVED_DATE_5 = "todayDateAfterChallenegeComplete5"
     private const val KEY_NUM_SUBMISSIONS = "numSubmissions"
     private const val KEY_UNIQUE_SOLVED = "uniqueSolved"
     private const val KEY_CACHED_UTC_DATE = "cached_utc_date"
@@ -40,6 +41,13 @@ object LeetCodeManager {
     fun isSolvedToday(context: Context): Boolean {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val lastSolvedDate = prefs.getString(KEY_LAST_SOLVED_DATE, null)
+        val today = getTodayDateString(context)
+        return lastSolvedDate == today
+    }
+
+    fun isSolvedToday5(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val lastSolvedDate = prefs.getString(KEY_LAST_SOLVED_DATE_5, null)
         val today = getTodayDateString(context)
         return lastSolvedDate == today
     }
@@ -128,25 +136,85 @@ object LeetCodeManager {
                     .apply()
                 Log.i(TAG, ">> Current Goal   : Increase total accepted from $currentCount")
                 return false
-            } else if (currentCount > storedCount) {
-                Log.i(TAG, ">> SUCCESS: New submission found! ($currentCount > $storedCount)")
-                markSolvedToday(context)
-                prefs.edit()
-                    .putInt(KEY_NUM_SUBMISSIONS, currentCount)
-                    .putInt(KEY_UNIQUE_SOLVED, uniqueSolved)
-                    .apply()
-                return true
             } else {
-                // Update unique count even if total submissions didn't increase (just in case)
-                prefs.edit().putInt(KEY_UNIQUE_SOLVED, uniqueSolved).apply()
+                // Determine new progress
+                val solvedTodayCount = if (currentCount > storedCount) currentCount - storedCount else 0
                 
-                val solvedToday = isSolvedToday(context)
-                if (solvedToday) {
-                     Log.i(TAG, ">> STATUS: ALREADY SOLVED TODAY.")
-                     return true
+                // Check for 1 problem unlock (Normal unlock)
+                if (currentCount > storedCount) {
+                    Log.i(TAG, ">> SUCCESS: New submission found! ($currentCount > $storedCount)")
+                    markSolvedToday(context)
+                    
+                    // Don't update stored count yet if we want to track daily progress relative to start of day?
+                    // Actually, if we update stored count, we lose the "baseline" for the day.
+                    // But the original app logic was: stored count tracks "last known count".
+                    // If we update it, next check shows 0 progress.
+                    
+                    // FIX: We need a SEPARATE baseline for "Start of Day Count" to verify 5 problems.
+                    // For now, let's keep it simple: We allow the user to accumulate 5 problems.
+                    // But if we update KEY_NUM_SUBMISSIONS, we lose the ability to count to 5 across multiple checks.
+                    
+                    // STRATEGY: 
+                    // 1. KEY_NUM_SUBMISSIONS = Total count at very first install (or reset).
+                    // Actually, we should probably treat KEY_NUM_SUBMISSIONS as the dynamic tracker.
+                    // We need a KEY_START_OF_DAY_COUNT to track daily progress.
+                    
+                    // Let's implement a simpler "Daily Baseline" logic if not present.
+                    val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    val dailyBaseline = prefs.getInt("daily_baseline", -1)
+                    var effectiveBaseline = dailyBaseline
+                    
+                    val todayDate = getTodayDateString(context)
+                    val lastBaselineDate = prefs.getString("daily_baseline_date", "")
+                    
+                    if (dailyBaseline == -1 || lastBaselineDate != todayDate) {
+                        // New day or first run: Set baseline to storedCount (last known)
+                        effectiveBaseline = storedCount
+                        prefs.edit()
+                            .putInt("daily_baseline", effectiveBaseline)
+                            .putString("daily_baseline_date", todayDate)
+                            .apply()
+                         Log.i(TAG, ">> New Day Baseline set to: $effectiveBaseline")
+                    }
+                    
+                    val actualSolvedToday = currentCount - effectiveBaseline
+                    Log.i(TAG, ">> Today Solved So Far: $actualSolvedToday")
+                    
+                    if (actualSolvedToday >= 5) {
+                        Log.i(TAG, ">> SUCCESS: 5 Problems Solved Goal Reached!")
+                        markSolvedToday5(context)
+                    }
+                    
+                    // Update latest count
+                    prefs.edit()
+                        .putInt(KEY_NUM_SUBMISSIONS, currentCount)
+                        .putInt(KEY_UNIQUE_SOLVED, uniqueSolved)
+                        .apply()
+                        
+                    return true
+                } else {
+                     // Check if ALREADY solved 5 today based on baseline
+                     val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                     val dailyBaseline = prefs.getInt("daily_baseline", -1)
+                     if (dailyBaseline != -1) {
+                         val actualSolvedToday = currentCount - dailyBaseline
+                          if (actualSolvedToday >= 5) {
+                            if (!isSolvedToday5(context)) {
+                                markSolvedToday5(context)
+                            }
+                        }
+                     }
+
+                     // Update unique count
+                     prefs.edit().putInt(KEY_UNIQUE_SOLVED, uniqueSolved).apply()
+                     
+                     val solvedToday = isSolvedToday(context)
+                     if (solvedToday) {
+                          Log.i(TAG, ">> STATUS: ALREADY SOLVED TODAY (At least 1).")
+                          return true
+                     }
+                     Log.i(TAG, ">> STATUS: PENDING.")
                 }
-                Log.i(TAG, ">> STATUS: PENDING. (Need to solve at least 1 problem)")
-                Log.i(TAG, ">> HINT: Go to LeetCode and get one 'Accepted' submission.")
             }
             Log.i(TAG, "==================================================")
         } catch (e: Exception) {
@@ -164,10 +232,21 @@ object LeetCodeManager {
         
         val uniqueMsg = "Total Unique Solved: $uniqueSolved\n"
         
+        val currentCount = prefs.getInt(KEY_NUM_SUBMISSIONS, 0)
+        // Note: KEY_NUM_SUBMISSIONS actually stores the *starting* count for the day now, effectively.
+        // Wait, the logic above in checkAndSaveStatus used storedCount as baseline.
+        // But we actually need to persist the baseline somewhere else if we want KEY_NUM_SUBMISSIONS to be current.
+        // Actually, KEY_NUM_SUBMISSIONS in the previous logic was holding the *last known* count.
+        // To track "today's progress", we need a "start of day" count.
+        
+        // Let's assume for now we just show status based on isSolvedToday.
+        // Since we don't have the "current total" readily available here without fetching, 
+        // we can't show exact "2/5" progress in this text easily without another fetch or pref.
+        
         return if (solved) {
             "${uniqueMsg}Status: [ COMPLETED ]\nYou are free for today!"
         } else {
-            "${uniqueMsg}Status: [ PENDING ]\nGoal: Solve one problem to unlock."
+            "${uniqueMsg}Status: [ PENDING ]\nGoal: Solve 5 problems to unlock specific apps."
         }
     }
 
@@ -177,6 +256,14 @@ object LeetCodeManager {
             .putString(KEY_LAST_SOLVED_DATE, getTodayDateString(context))
             .apply()
         Log.i(TAG, "Marked as solved for today!")
+    }
+
+    private fun markSolvedToday5(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit()
+            .putString(KEY_LAST_SOLVED_DATE_5, getTodayDateString(context))
+            .apply()
+        Log.i(TAG, "Marked as 5 PROBLEMS solved for today!")
     }
 
     /**
@@ -229,8 +316,12 @@ object LeetCodeManager {
 
     fun resetProgress(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().clear().apply()
-        Log.i(TAG, "LeetCode progress reset successfully!")
+        
+        // Only remove the "Solved Today" flag. 
+        // We DO NOT clear the 'daily_baseline' or 'storedCount', so the 5-problem progress is preserved.
+        prefs.edit().remove(KEY_LAST_SOLVED_DATE).apply()
+        
+        Log.i(TAG, "LeetCode 1-problem status reset! (5-problem progress preserved)")
     }
 
     private fun getFallbackDateString(): String {

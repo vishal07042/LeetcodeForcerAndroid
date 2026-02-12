@@ -11,8 +11,14 @@ import android.widget.Toast
 
 class LeetCodeForcerService : AccessibilityService() {
 
+
     companion object {
         private const val TAG = "LeetCodeForcer"
+
+        // Apps that require 5 problems to be solved
+        private val APPS_REQUIRE_5_PROBLEMS = setOf(
+            "com.tencent.ig"
+        )
 
         private val WHITELIST_PACKAGES = setOf(
             "com.google.android.gms",
@@ -36,7 +42,7 @@ class LeetCodeForcerService : AccessibilityService() {
             "com.android.settings",
             "com.android.systemui",
             "com.android.settingsaccessibility",
-            "com.google.android.inputmethod.latin",
+//            "com.google.android.inputmethod.latin",
             "com.mi.globalminusscreen",
            
             "com.android.settings",
@@ -75,8 +81,18 @@ class LeetCodeForcerService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Unlock only when BOTH LeetCode task and Brilliant (30 min) are done.
-        val isUnlocked = LeetCodeManager.isSolvedToday(this) && isBrilliantTaskDone(this)
+        // Unlock only when BOTH LeetCode task, Brilliant (30 min), steps and squats are done.
+        // NOTE: We read from SharedPreferences here (fast). The file is only read when the Tile is clicked.
+        val (steps, squats) = getAlarmyData(this)
+
+        // Log stats for debugging
+        Log.v(TAG, "Check status: LC=${LeetCodeManager.isSolvedToday(this)}, Brilliant=${isBrilliantTaskDone(this)}, Steps=$steps, Squats=$squats")
+
+        val isUnlocked = LeetCodeManager.isSolvedToday(this) && 
+                         isBrilliantTaskDone(this) && 
+                         steps > 100 && 
+                         squats > 100
+        
         if (isUnlocked) return
 
         if (event == null || event.packageName == null) return
@@ -96,12 +112,25 @@ class LeetCodeForcerService : AccessibilityService() {
     }
 
     private fun isPackageAllowed(pkg: String): Boolean {
+
+        // Specific 5-problem rule for certain apps
+        if (APPS_REQUIRE_5_PROBLEMS.contains(pkg)) {
+            val isFiveProblemsSolved = LeetCodeManager.isSolvedToday5(this) // Use the 5-problem check
+            if (!isFiveProblemsSolved) {
+                Log.w(TAG, "BLOCKING: $pkg (Requires 5 LeetCode problems today)")
+                Toast.makeText(this, "Solve 5 LeetCode problems to use this app!", Toast.LENGTH_SHORT).show()
+                return false
+            }
+        }
+
         if (WHITELIST_PACKAGES.contains(pkg)) return true
         // Allow launchers generally (simple heuristic: contains launcher)
 
 
 //        if (pkg.contains("tasker")) return true
-        if (pkg.contains("launcher")) return true
+        if (pkg.contains("launcher")) return true;
+           if(pkg.contains("newpipe")) return true;
+        if(pkg.contains("input")) return true;
        if (pkg.contains("calendar")) return true;
        if (pkg.contains("home")) return true;
        if (pkg.contains("plan")) return true;
