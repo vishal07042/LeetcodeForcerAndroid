@@ -21,6 +21,7 @@ class LeetCodeForcerService : AccessibilityService() {
         )
 
         private val WHITELIST_PACKAGES = setOf(
+           "com.google.android.permissioncontroller",
             "com.google.android.gms",
             "com.android.vending",
             "com.whatsapp",
@@ -129,7 +130,7 @@ class LeetCodeForcerService : AccessibilityService() {
 
 //        if (pkg.contains("tasker")) return true
         if (pkg.contains("launcher")) return true;
-           if(pkg.contains("newpipe")) return true;
+        if(pkg.contains("newpipe")) return true;
         if(pkg.contains("input")) return true;
        if (pkg.contains("calendar")) return true;
        if (pkg.contains("home")) return true;

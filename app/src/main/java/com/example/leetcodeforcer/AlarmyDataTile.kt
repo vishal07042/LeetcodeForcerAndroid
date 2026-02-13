@@ -13,14 +13,10 @@ class AlarmyDataTile : TileService() {
 
     override fun onClick() {
         super.onClick()
-        // Force refresh from file when tile is clicked
-        val refreshedData = refreshAlarmyData(this)
-        if (refreshedData != null) {
-            val (steps, squats) = refreshedData
-            Toast.makeText(this, "Refreshed: Steps=$steps, Squats=$squats", Toast.LENGTH_SHORT).show()
-        } else {
-             Toast.makeText(this, "No data file found", Toast.LENGTH_SHORT).show()
-        }
+        // Data is updated by AlarmyDataReceiver via Intent from Alarmy
+        // Just read the latest values from SharedPreferences
+        val (steps, squats) = getAlarmyData(this)
+        Toast.makeText(this, "Current: Steps=$steps, Squats=$squats", Toast.LENGTH_SHORT).show()
         updateTile()
     }
 

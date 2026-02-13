@@ -34,8 +34,14 @@ class LeetCodeTileServiceShowStats : TileService() {
                 Log.d(TAG, "Fetching LeetCode and Brilliant status...")
                 val lcSolved = LeetCodeManager.checkAndSaveStatus(applicationContext)
                 val brilliantDone = isBrilliantTaskDone(applicationContext)
-                val isUnlocked = lcSolved && brilliantDone
-                Log.d(TAG, "LC solved: $lcSolved, Brilliant done: $brilliantDone -> unlocked: $isUnlocked")
+                
+                // Fetch Steps & Squats from SharedPreferences (populated by AlarmyDataReceiver)
+                val (steps, squats) = getAlarmyData(applicationContext)
+                val stepsDone = steps > 100
+                val squatsDone = squats > 100
+
+                val isUnlocked = lcSolved && brilliantDone && stepsDone && squatsDone
+                Log.d(TAG, "LC: $lcSolved, Bril: $brilliantDone, Steps: $steps($stepsDone), Squats: $squats($squatsDone) -> Unlocked: $isUnlocked")
 
                 withContext(Dispatchers.Main) {
                     updateTileState(isUnlocked)
@@ -46,7 +52,14 @@ class LeetCodeTileServiceShowStats : TileService() {
 
                     val lcStatus = LeetCodeManager.getDetailedStatus(applicationContext)
                     val brilliantStatus = getBrilliantStatusMessage(applicationContext)
-                    val fullMessage = "$serviceStatusMsg$blockingMsg\n\n$lcStatus\n\n$brilliantStatus"
+                    
+                    val stepsRemaining = (101 - steps).coerceAtLeast(0)
+                    val squatsRemaining = (101 - squats).coerceAtLeast(0)
+                    
+                    val stepsStatus = if (stepsDone) "Steps: [ COMPLETED ] ($steps)" else "Steps: [ PENDING ]\nDone: $steps\nRemaining: $stepsRemaining (Goal: > 100)"
+                    val squatsStatus = if (squatsDone) "Squats: [ COMPLETED ] ($squats)" else "Squats: [ PENDING ]\nDone: $squats\nRemaining: $squatsRemaining (Goal: > 100)"
+
+                    val fullMessage = "$serviceStatusMsg$blockingMsg\n\n$lcStatus\n\n$brilliantStatus\n\n$stepsStatus\n\n$squatsStatus"
 
                     try {
                         val dialog = android.app.AlertDialog.Builder(this@LeetCodeTileServiceShowStats)
@@ -73,7 +86,10 @@ class LeetCodeTileServiceShowStats : TileService() {
         super.onStartListening()
         val lcSolved = LeetCodeManager.isSolvedToday(applicationContext)
         val brilliantDone = isBrilliantTaskDone(applicationContext)
-        updateTileState(lcSolved && brilliantDone)
+        val (steps, squats) = getAlarmyData(applicationContext)
+        val stepsDone = steps > 100
+        val squatsDone = squats > 100
+        updateTileState(lcSolved && brilliantDone && stepsDone && squatsDone)
     }
 
     private fun updateTileState(isUnlocked: Boolean) {

@@ -44,14 +44,18 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     var isServiceEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
+    var hasUsagePerm by remember { mutableStateOf(hasUsageStatsPermission(context)) }
     val lifecycleOwner = LocalLifecycleOwner.current
+
+
 
     // Observe lifecycle changes to refresh status when returning to the app
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 isServiceEnabled = isAccessibilityServiceEnabled(context)
-                Log.d("MainScreen", "ON_RESUME: Service enabled = $isServiceEnabled")
+                hasUsagePerm = hasUsageStatsPermission(context)
+                Log.d("MainScreen", "ON_RESUME: Refreshing permissions")
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -63,7 +67,9 @@ fun MainScreen(modifier: Modifier = Modifier) {
     // Initial check
     LaunchedEffect(Unit) {
         isServiceEnabled = isAccessibilityServiceEnabled(context)
-        Log.d("MainScreen", "Initial Check: Service enabled = $isServiceEnabled")
+        hasUsagePerm = hasUsageStatsPermission(context)
+        Log.d("MainScreen", "Initial permissions - Usage: $hasUsagePerm, Service: $isServiceEnabled")
+        Log.d("MainScreen", "Android SDK: ${android.os.Build.VERSION.SDK_INT}")
     }
 
     Column(
@@ -129,6 +135,28 @@ fun MainScreen(modifier: Modifier = Modifier) {
                     }
                 }
             }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+
+
+        // Usage Stats Permission Card (Brilliant)
+        if (!hasUsagePerm) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+            ) {
+                Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Brilliant Tracking Permission", style = MaterialTheme.typography.titleMedium)
+                    Text("Needed to check Brilliant app usage", style = MaterialTheme.typography.bodySmall)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Button(onClick = { requestUsageStatsPermission(context) }) {
+                        Text("Grant Usage Access")
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -224,9 +252,6 @@ private fun isAccessibilityServiceEnabled(context: Context): Boolean {
 @Composable
 fun MainScreenPreview() {
     LeetCodeForcerTheme {
-        // Simulate both states for preview
-        Column {
-             MainScreen() // This will likely show disabled in preview context
-        }
+        MainScreen()
     }
 }
