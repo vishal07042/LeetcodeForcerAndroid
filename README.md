@@ -1,4 +1,4 @@
-# LeetCode Forcer Android
+# LeetCode Forcer 
 
 LeetCode Forcer is an Android app built with Jetpack Compose that turns daily LeetCode progress into a focus gate for selected apps. The app checks a user's LeetCode activity through the LeetCode GraphQL API, stores daily progress locally, and uses an `AccessibilityService` to block apps until the daily goal is met.
 
@@ -41,7 +41,7 @@ The full app flow is:
 
 ### 1. Compose UI for configuration and visibility
 
-The main screen is implemented in [`app/src/main/java/com/example/leetcodeforcer/MainActivity.kt`](/c:/Users/profe/Downloads/jetpackComposePortfiolio/LeetcodeForcerAndroid-main%20(2)/LeetcodeForcerAndroid-main/app/src/main/java/com/example/leetcodeforcer/MainActivity.kt).
+The main screen is implemented in `app/src/main/java/com/example/leetcodeforcer/MainActivity.kt`.
 
 It provides:
 
@@ -56,7 +56,7 @@ This screen acts as the control center for the project. It does not do heavy log
 
 ### 2. LeetCode progress detection through GraphQL
 
-LeetCode integration lives in [`app/src/main/java/com/example/leetcodeforcer/LeetCodeManager.kt`](/c:/Users/profe/Downloads/jetpackComposePortfiolio/LeetcodeForcerAndroid-main%20(2)/LeetcodeForcerAndroid-main/app/src/main/java/com/example/leetcodeforcer/LeetCodeManager.kt).
+LeetCode integration lives in `app/src/main/java/com/example/leetcodeforcer/LeetCodeManager.kt`.
 
 This module is responsible for:
 
@@ -73,7 +73,7 @@ For selected apps, there is also a stricter rule: some packages require at least
 
 ### 3. Focus scheduling and package rules
 
-Focus rules are managed in [`app/src/main/java/com/example/leetcodeforcer/FocusSettingsManager.kt`](/c:/Users/profe/Downloads/jetpackComposePortfiolio/LeetcodeForcerAndroid-main%20(2)/LeetcodeForcerAndroid-main/app/src/main/java/com/example/leetcodeforcer/FocusSettingsManager.kt).
+Focus rules are managed in `app/src/main/java/com/example/leetcodeforcer/FocusSettingsManager.kt`.
 
 This module stores:
 
@@ -86,7 +86,7 @@ The enforcement logic only runs when a focus session is active. If no sessions a
 
 ### 4. Accessibility-based enforcement
 
-App blocking is implemented in [`app/src/main/java/com/example/leetcodeforcer/LeetCodeForcerService.kt`](/c:/Users/profe/Downloads/jetpackComposePortfiolio/LeetcodeForcerAndroid-main%20(2)/LeetcodeForcerAndroid-main/app/src/main/java/com/example/leetcodeforcer/LeetCodeForcerService.kt).
+App blocking is implemented in `app/src/main/java/com/example/leetcodeforcer/LeetCodeForcerService.kt`.
 
 The service listens for `TYPE_WINDOW_STATE_CHANGED` events, which effectively means it notices when the active window changes. When a package comes to the foreground, the service evaluates the current rules:
 
@@ -103,13 +103,13 @@ This is the key mechanism that turns solve progress into real device friction.
 
 The project also exposes Quick Settings tiles:
 
-- [`app/src/main/java/com/example/leetcodeforcer/LeetCodeTileService.kt`](/c:/Users/profe/Downloads/jetpackComposePortfiolio/LeetcodeForcerAndroid-main%20(2)/LeetcodeForcerAndroid-main/app/src/main/java/com/example/leetcodeforcer/LeetCodeTileService.kt)
+- `app/src/main/java/com/example/leetcodeforcer/LeetCodeTileService.kt`
   Refreshes LeetCode status and shows whether the device is effectively locked or unlocked.
-- [`app/src/main/java/com/example/leetcodeforcer/LeetcodeTileService2.kt`](/c:/Users/profe/Downloads/jetpackComposePortfiolio/LeetcodeForcerAndroid-main%20(2)/LeetcodeForcerAndroid-main/app/src/main/java/com/example/leetcodeforcer/LeetcodeTileService2.kt)
+- `app/src/main/java/com/example/leetcodeforcer/LeetcodeTileService2.kt`
   Shows broader status, including focus-session and accessibility-service state.
-- [`app/src/main/java/com/example/leetcodeforcer/LeetcodeResetTile.kt`](/c:/Users/profe/Downloads/jetpackComposePortfiolio/LeetcodeForcerAndroid-main%20(2)/LeetcodeForcerAndroid-main/app/src/main/java/com/example/leetcodeforcer/LeetcodeResetTile.kt)
+- `app/src/main/java/com/example/leetcodeforcer/LeetcodeResetTile.kt`
   Clears the normal daily completion marker.
-- [`app/src/main/java/com/example/leetcodeforcer/AlarmyDataTile.kt`](/c:/Users/profe/Downloads/jetpackComposePortfiolio/LeetcodeForcerAndroid-main%20(2)/LeetcodeForcerAndroid-main/app/src/main/java/com/example/leetcodeforcer/AlarmyDataTile.kt)
+- `app/src/main/java/com/example/leetcodeforcer/AlarmyDataTile.kt`
   Shows whether a focus session is active and how many sessions exist.
 
 These tiles reduce friction for daily use. The user does not need to open the full app just to refresh or check status.
