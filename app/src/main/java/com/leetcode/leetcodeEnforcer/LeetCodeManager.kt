@@ -24,6 +24,8 @@ object LeetCodeManager {
     private const val KEY_CACHED_UTC_DATE_AT = "cached_utc_date_at"
     private const val KEY_IS_FROZEN = "is_frozen"
     private const val KEY_IS_FROZEN_2 = "is_frozen_2"
+    private const val KEY_IS_FROZEN_3 = "is_frozen_3"
+    private const val KEY_PREVENT_UNINSTALL = "is_prevent_uninstall"
     private const val DATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000L
     private const val TIME_API_URL = "https://gettimeapi.dev/v1/time"
 
@@ -80,6 +82,26 @@ object LeetCodeManager {
     fun setFrozen2(context: Context, frozen: Boolean) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putBoolean(KEY_IS_FROZEN_2, frozen).apply()
+    }
+
+    fun isFrozen3(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_IS_FROZEN_3, false)
+    }
+
+    fun setFrozen3(context: Context, frozen: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_IS_FROZEN_3, frozen).apply()
+    }
+
+    fun isPreventUninstallEnabled(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_PREVENT_UNINSTALL, false)
+    }
+
+    fun setPreventUninstallEnabled(context: Context, enabled: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_PREVENT_UNINSTALL, enabled).apply()
     }
 
     fun isSolvedToday5(context: Context): Boolean {

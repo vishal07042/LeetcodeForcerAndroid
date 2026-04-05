@@ -2,125 +2,240 @@ package com.leetcode.leetcodeEnforcer
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.os.Build
-import androidx.core.app.NotificationCompat
 
 class LeetCodeForcerService : AccessibilityService() {
-
 
     companion object {
         private const val TAG = "LeetCodeForcer"
 
-        // Apps that require 5 problems to be solved
         private val APPS_REQUIRE_5_PROBLEMS = setOf(
             "com.tencent.ig"
         )
+
+        private val APP_NAME_TEXTS = listOf("LeetCode Forcer", "leetcode forcer")
+        private val DANGEROUS_TEXTS = listOf(
+            "uninstall",
+            "force stop",
+            "disable",
+            "deactivate",
+            "clear data",
+            "remove",
+            "delete",
+            "turn off"
+        )
+        private val SETTINGS_CONTEXT_TEXTS = listOf(
+            "accessibility",
+            "device admin",
+            "device administrator",
+            "permissions"
+        )
+        private val APP_DETAIL_TITLE_IDS = listOf(
+            "com.android.settings:id/collapsing_appbar_extended_title",
+            "com.android.settings:id/collapsing_toolbar",
+            "android:id/alertTitle",
+            "com.miui.securitycenter:id/tv_title"
+        )
+        private val DANGEROUS_CLASS_NAMES = setOf(
+            "com.android.packageinstaller.UninstallerActivity",
+            "com.android.settings.SubSettings",
+            "com.miui.applicationlock.PrivacyAndAppLockManageActivity"
+        )
+        private const val SAMSUNG_MULTI_UNINSTALL_ID = "com.sec.android.app.launcher:id/multi_select_uninstall"
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.i(TAG, "Service connected")
-        showPersistentNotification()
-        
-        val info = AccessibilityServiceInfo()
-        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
-        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-        info.flags = AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
-        serviceInfo = info
+        serviceInfo = AccessibilityServiceInfo().apply {
+            eventTypes = AccessibilityEvent.TYPE_VIEW_CLICKED or
+                AccessibilityEvent.TYPE_VIEW_LONG_CLICKED or
+                AccessibilityEvent.TYPE_VIEW_FOCUSED or
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
+                AccessibilityEvent.TYPE_VIEW_CONTEXT_CLICKED
+            feedbackType = AccessibilityServiceInfo.FEEDBACK_ALL_MASK
+            notificationTimeout = 100
+            flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+                AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || event.packageName == null) return
         val packageName = event.packageName.toString()
+        val className = event.className?.toString().orEmpty()
 
-        // Anti-uninstall protection
-        if (packageName == "com.android.settings") {
-            val dpm = getSystemService(android.content.Context.DEVICE_POLICY_SERVICE) as android.app.admin.DevicePolicyManager
-            val componentName = android.content.ComponentName(this, LeetCodeDeviceAdminReceiver::class.java)
-            if (dpm.isAdminActive(componentName) && FocusSettingsManager.isFocusSessionActiveNow(this) && !LeetCodeManager.isSolvedToday(this)) {
-                var foundTarget = event.text.any { it?.contains("LeetCode Forcer", ignoreCase = true) == true }
-                val rootNode = rootInActiveWindow
-                if (rootNode != null && !foundTarget) {
-                    val nodes = rootNode.findAccessibilityNodeInfosByText("LeetCode Forcer")
-                    if (!nodes.isNullOrEmpty()) {
-                        foundTarget = true
-                    }
-                }
-                if (foundTarget) {
-                    Toast.makeText(this, "Uninstallation is locked during active focus sessions!", Toast.LENGTH_SHORT).show()
-                    performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
-                    performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                        performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)
-                    }
-                    return
-                }
-            }
+        if (shouldBlockProtectedSettings(event, packageName, className)) {
+            Log.w(TAG, "Blocking protected settings pkg=$packageName cls=$className")
+            blockAndLock("Security: Protected settings locked during focus!")
+            return
         }
 
         val isFrozen = LeetCodeManager.isFrozen(this)
         val isFrozen2 = LeetCodeManager.isFrozen2(this)
+        val isFrozen3 = LeetCodeManager.isFrozen3(this)
         val solved = LeetCodeManager.isSolvedToday(this)
+        val activeSession = FocusSettingsManager.getActiveSessionNow(this)
 
-        // If frozen and not solved, we enforce 24/7 (ignore sessions)
-        if ((isFrozen || isFrozen2) && !solved) {
-            if (!isPackageAllowedWhenLocked(packageName)) {
-                blockPackage(packageName, "Extreme Mode: Solve LeetCode to unlock")
+        if (!solved) {
+            if (isFrozen2) {
+                val allowed = isPackageAllowedInFreeze2(packageName)
+                Log.i(TAG, "pkg=$packageName mode=freeze2 allowed=$allowed")
+                if (!allowed) {
+                    blockPackage(packageName, "Extreme Mode 2: only selected apps are allowed until you solve LeetCode.")
+                }
+                return
             }
-            return
+
+            if (isFrozen) {
+                val allowed = isPackageAllowedInFreeze1(packageName)
+                Log.i(TAG, "pkg=$packageName mode=freeze1 allowed=$allowed")
+                if (!allowed) {
+                    blockPackage(packageName, "Extreme Mode: Solve LeetCode to unlock")
+                }
+                return
+            }
+
+            if (isFrozen3 && activeSession != null) {
+                val allowed = isPackageAllowedInSession(packageName, activeSession)
+                Log.i(TAG, "pkg=$packageName mode=freeze3 allowed=$allowed")
+                if (!allowed) {
+                    blockPackage(packageName, "Extreme Mode 3: Solve LeetCode to unlock")
+                }
+                return
+            }
         }
 
-        if (!FocusSettingsManager.isFocusSessionActiveNow(this)) {
-            return
-        }
+        if (activeSession == null || solved) return
 
-        if (solved) {
-            return
-        }
-
-        if (!isPackageAllowedWhenLocked(packageName)) {
-            blockPackage(packageName, "Solve a question  on LeetCode to unlock")
+        val allowed = isPackageAllowedInSession(packageName, activeSession)
+        Log.i(TAG, "pkg=$packageName mode=session allowed=$allowed")
+        if (!allowed) {
+            blockPackage(packageName, "Solve a question on LeetCode to unlock")
         }
     }
- 
+
     override fun onInterrupt() {
         Log.i(TAG, "Service interrupted")
     }
 
-    private fun isPackageAllowedWhenLocked(pkg: String): Boolean {
+    private fun shouldBlockProtectedSettings(
+        event: AccessibilityEvent,
+        packageName: String,
+        className: String
+    ): Boolean {
+        if (!LeetCodeManager.isPreventUninstallEnabled(this)) return false
+        if (!isProtectedSettingsPackage(packageName) && className !in DANGEROUS_CLASS_NAMES) return false
+
+        val dpm = getSystemService(DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        val adminComponent = ComponentName(this, LeetCodeDeviceAdminReceiver::class.java)
+        if (!dpm.isAdminActive(adminComponent)) return false
+
+        val root = rootInActiveWindow
+        val source = event.source
+        try {
+            val hasAppName = root?.let { containsAnyText(it, APP_NAME_TEXTS) } == true ||
+                source?.let { containsAnyText(it, APP_NAME_TEXTS) } == true
+            if (!hasAppName) return false
+
+            val hasDangerousText = root?.let { containsAnyText(it, DANGEROUS_TEXTS) } == true ||
+                source?.let { containsAnyText(it, DANGEROUS_TEXTS) } == true
+            val inSettingsContext = root?.let { containsAnyText(it, SETTINGS_CONTEXT_TEXTS) } == true
+            val onAppDetailPage = root?.let { containsAnyViewId(it, APP_DETAIL_TITLE_IDS) } == true
+            val hasSamsungUninstall = source?.viewIdResourceName.equals(SAMSUNG_MULTI_UNINSTALL_ID, ignoreCase = true) ||
+                root?.let { containsViewId(it, SAMSUNG_MULTI_UNINSTALL_ID) } == true
+
+            return hasSamsungUninstall ||
+                className in DANGEROUS_CLASS_NAMES ||
+                (packageName == "com.miui.securitycenter" && (hasDangerousText || onAppDetailPage)) ||
+                (packageName == "com.android.settings" && (hasDangerousText || inSettingsContext || onAppDetailPage)) ||
+                (packageName.contains("packageinstaller", ignoreCase = true))
+        } finally {
+            try {
+                source?.recycle()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun isProtectedSettingsPackage(pkg: String): Boolean {
+        return pkg == "com.android.settings" ||
+            pkg == "com.android.settingsaccessibility" ||
+            pkg == "com.miui.securitycenter" ||
+            pkg.contains("packageinstaller", ignoreCase = true) ||
+            pkg.contains("installer", ignoreCase = true)
+    }
+
+    private fun containsAnyText(node: AccessibilityNodeInfo, values: List<String>): Boolean {
+        val text = node.text?.toString().orEmpty()
+        val desc = node.contentDescription?.toString().orEmpty()
+        if (values.any { text.contains(it, ignoreCase = true) || desc.contains(it, ignoreCase = true) }) {
+            return true
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (containsAnyText(child, values)) return true
+        }
+        return false
+    }
+
+    private fun containsAnyViewId(node: AccessibilityNodeInfo, ids: List<String>): Boolean {
+        val id = node.viewIdResourceName.orEmpty()
+        if (ids.any { id.equals(it, ignoreCase = true) }) return true
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (containsAnyViewId(child, ids)) return true
+        }
+        return false
+    }
+
+    private fun containsViewId(node: AccessibilityNodeInfo, exactId: String): Boolean {
+        if (node.viewIdResourceName.equals(exactId, ignoreCase = true)) return true
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (containsViewId(child, exactId)) return true
+        }
+        return false
+    }
+
+    private fun isPackageAllowedInFreeze1(pkg: String): Boolean {
         if (FocusSettingsManager.isAlwaysAllowedPackage(pkg)) return true
+        return !isLauncherApp(pkg)
+    }
 
-        val userWhitelist = FocusSettingsManager.getWhitelist(this)
-        if (userWhitelist.contains(pkg)) return true
+    private fun isPackageAllowedInFreeze2(pkg: String): Boolean {
+        if (FocusSettingsManager.isAlwaysAllowedPackage(pkg)) return true
+        if (FocusSettingsManager.getFreeze2Whitelist(this).contains(pkg)) return true
 
-        // Specific 5-problem rule for certain apps
         if (APPS_REQUIRE_5_PROBLEMS.contains(pkg)) {
-            val isFiveProblemsSolved = LeetCodeManager.isSolvedToday5(this) // Use the 5-problem check
+            val isFiveProblemsSolved = LeetCodeManager.isSolvedToday5(this)
             if (!isFiveProblemsSolved) {
-                Log.w(TAG, "BLOCKING: $pkg (Requires 5 LeetCode problems today)")
                 Toast.makeText(this, "Solve 5 LeetCode problems to use this app!", Toast.LENGTH_SHORT).show()
                 return false
             }
             return true
         }
 
-        // Allow background/system apps that don't have a launcher icon
-        if (!isLauncherApp(pkg)) {
-            return true
-        }
+        return !isLauncherApp(pkg)
+    }
 
-        return false
+    private fun isPackageAllowedInSession(pkg: String, session: FocusSession): Boolean {
+        if (FocusSettingsManager.isAlwaysAllowedPackage(pkg)) return true
+        if (session.whitelist.contains(pkg)) return true
+        return !isLauncherApp(pkg)
     }
 
     private fun isLauncherApp(pkg: String): Boolean {
         return try {
             packageManager.getLaunchIntentForPackage(pkg) != null
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             false
         }
     }
@@ -129,32 +244,14 @@ class LeetCodeForcerService : AccessibilityService() {
         Log.w(TAG, "BLOCKING: $packageName ($message)")
         performGlobalAction(GLOBAL_ACTION_BACK)
         performGlobalAction(GLOBAL_ACTION_HOME)
-        performGlobalAction(GLOBAL_ACTION_HOME)
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
-    private fun showPersistentNotification() {
-        val channelId = "LeetCodeForcerChannel"
-        val notificationManager = getSystemService(NotificationManager::class.java)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "LeetCode Forcer Background Service",
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = "Keeps the app active and ensures you are focused"
-            }
-            notificationManager?.createNotificationChannel(channel)
+    private fun blockAndLock(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        performGlobalAction(GLOBAL_ACTION_HOME)
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN)
         }
-
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("LeetCode Forcer is Active")
-            .setContentText("Monitoring your phone usage for focus sessions.")
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
-            .setOngoing(true)
-            .build()
-            
-        notificationManager?.notify(1001, notification)
     }
 }

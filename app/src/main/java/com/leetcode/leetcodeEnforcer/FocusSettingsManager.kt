@@ -9,12 +9,14 @@ data class FocusSession(
     val id: Long,
     val days: Set<Int>,
     val startMinute: Int,
-    val endMinute: Int
+    val endMinute: Int,
+    val whitelist: Set<String> = emptySet()
 )
 
 object FocusSettingsManager {
     private const val PREFS_NAME = "focus_settings_prefs"
     private const val KEY_WHITELIST = "user_whitelist"
+    private const val KEY_FREEZE2_WHITELIST = "freeze2_whitelist"
     private const val KEY_SESSIONS = "focus_sessions"
 
     private val ALWAYS_ALLOWED_PACKAGES = setOf(
@@ -23,16 +25,7 @@ object FocusSettingsManager {
         "com.android.vending",
         "com.leetcode.leetcodeEnforcer",
         "com.google.android.inputmethod.latin",
-        // "com.whatsapp",
         "com.miui.securityadd",
-        // "com.google.android.keep",
-        // "com.focus.mobile.focus",
-        // "cc.forestapp",
-        // "droom.sleepIfUCan",
-        // "org.brilliant.android",
-        // "app.getatoms.android",
-        // "com.anthropic.claude",
-        // "com.phonepe.app",
         "com.miui.securitycenter",
         "com.miui.powerkeeper",
         "com.miui.cleanmaster",
@@ -45,17 +38,11 @@ object FocusSettingsManager {
         "com.mi.globalminusscreen",
         "com.google.android.apps.nexuslauncher",
         "com.android.launcher3",
-        "com.leetcode.leetcodeEnforcer",
         "com.google.android.apps.docs.editors.docs",
         "com.google.android.apps.docs.editors.sheets",
         "com.google.android.apps.docs.editors.slides",
         "com.google.android.gm",
-        // "notion.id",
-        // "com.example.peedo",
-        // "ai.x.grok",
-        // "com.wlxd.pomochallenge",
         "com.google.android.apps.messaging",
-        // "com.google.android.apps.bard"
     )
 
     fun getWhitelist(context: Context): Set<String> {
@@ -65,18 +52,20 @@ object FocusSettingsManager {
 
     fun addToWhitelist(context: Context, pkg: String): String {
         val normalized = normalizePackage(pkg) ?: return "Invalid package"
-        if (ALWAYS_ALLOWED_PACKAGES.contains(normalized) || isAlwaysAllowedPackage(normalized)) return "App is always allowed by default"
-        
-        val whitelist = java.util.HashSet(getWhitelist(context))
+        if (ALWAYS_ALLOWED_PACKAGES.contains(normalized) || isAlwaysAllowedPackage(normalized)) {
+            return "App is always allowed by default"
+        }
+
+        val whitelist = HashSet(getWhitelist(context))
         if (whitelist.contains(normalized)) return "Already in whitelist"
-        
+
         whitelist.add(normalized)
         persistLists(context, whitelist)
         return "Added $pkg"
     }
 
     fun removeFromWhitelist(context: Context, pkg: String) {
-        val whitelist = java.util.HashSet(getWhitelist(context))
+        val whitelist = HashSet(getWhitelist(context))
         if (whitelist.remove(pkg)) {
             persistLists(context, whitelist)
         }
@@ -84,7 +73,23 @@ object FocusSettingsManager {
 
     fun clearWhitelist(context: Context) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().remove(KEY_WHITELIST).apply()
+        prefs.edit().remove(KEY_WHITELIST).commit()
+    }
+
+    fun getFreeze2Whitelist(context: Context): Set<String> {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getStringSet(KEY_FREEZE2_WHITELIST, emptySet()) ?: emptySet()
+    }
+
+    fun setFreeze2Whitelist(context: Context, packages: Set<String>) {
+        val normalized = packages.mapNotNull(::normalizePackage).toSet()
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putStringSet(KEY_FREEZE2_WHITELIST, normalized).commit()
+    }
+
+    fun clearFreeze2Whitelist(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().remove(KEY_FREEZE2_WHITELIST).commit()
     }
 
     fun getSessions(context: Context): List<FocusSession> {
@@ -101,12 +106,17 @@ object FocusSettingsManager {
             val days = mutableSetOf<Int>()
             for (j in 0 until dayArray.length()) {
                 val day = dayArray.optInt(j, -1)
-                if (day in Calendar.SUNDAY..Calendar.SATURDAY) {
-                    days.add(day)
-                }
+                if (day in Calendar.SUNDAY..Calendar.SATURDAY) days.add(day)
             }
+
+            val wlArray = item.optJSONArray("whitelist") ?: JSONArray()
+            val wl = mutableSetOf<String>()
+            for (j in 0 until wlArray.length()) {
+                wl.add(wlArray.optString(j))
+            }
+
             if (days.isNotEmpty()) {
-                list.add(FocusSession(id = id, days = days, startMinute = startMinute, endMinute = endMinute))
+                list.add(FocusSession(id = id, days = days, startMinute = startMinute, endMinute = endMinute, whitelist = wl))
             }
         }
         return list.sortedBy { it.id }
@@ -123,16 +133,17 @@ object FocusSettingsManager {
         saveSessions(context, sessions)
     }
 
-    fun isFocusSessionActiveNow(context: Context): Boolean {
+    fun isFocusSessionActiveNow(context: Context): Boolean = getActiveSessionNow(context) != null
+
+    fun getActiveSessionNow(context: Context): FocusSession? {
         val sessions = getSessions(context)
-        if (sessions.isEmpty()) {
-            return false
-        }
+        if (sessions.isEmpty()) return null
+
         val now = Calendar.getInstance()
         val currentDay = now.get(Calendar.DAY_OF_WEEK)
         val currentMinute = now.get(Calendar.HOUR_OF_DAY) * 60 + now.get(Calendar.MINUTE)
 
-        return sessions.any { session ->
+        return sessions.find { session ->
             if (!session.days.contains(currentDay)) {
                 false
             } else if (session.startMinute == session.endMinute) {
@@ -164,9 +175,7 @@ object FocusSettingsManager {
 
     private fun persistLists(context: Context, whitelist: Set<String>) {
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit()
-            .putStringSet(KEY_WHITELIST, whitelist)
-            .apply()
+        prefs.edit().putStringSet(KEY_WHITELIST, whitelist).commit()
     }
 
     private fun saveSessions(context: Context, sessions: List<FocusSession>) {
@@ -174,14 +183,17 @@ object FocusSettingsManager {
         sessions.forEach { session ->
             val obj = JSONObject()
             val days = JSONArray()
-            session.days.sorted().forEach { day -> days.put(day) }
+            session.days.sorted().forEach { days.put(it) }
             obj.put("id", session.id)
             obj.put("days", days)
             obj.put("startMinute", session.startMinute.coerceIn(0, 1439))
             obj.put("endMinute", session.endMinute.coerceIn(0, 1439))
+            val wl = JSONArray()
+            session.whitelist.forEach { wl.put(it) }
+            obj.put("whitelist", wl)
             array.put(obj)
         }
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_SESSIONS, array.toString()).apply()
+        prefs.edit().putString(KEY_SESSIONS, array.toString()).commit()
     }
 }

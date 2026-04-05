@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">LeetCode Forcer</string>
     <string name="accessibility_service_description">Blocks distracting apps until you solve a LeetCode problem.</string>
+    <string name="device_admin_permission_description">Granting this permission helps prevent uninstalling or disabling LeetCode Forcer during active lock modes.</string>
 </resources>

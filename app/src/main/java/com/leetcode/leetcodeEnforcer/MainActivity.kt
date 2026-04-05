@@ -944,12 +944,6 @@ fun LabelText(text: String) {
     Text(text, style = Typography.labelSmall.copy(letterSpacing = 0.08.sp), modifier = Modifier.padding(vertical = 4.dp))
 }
 
-private fun isAccessibilityServiceEnabled(context: Context): Boolean {
-    val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-    val enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-    return enabledServices.any { it.resolveInfo.serviceInfo.packageName == context.packageName && it.resolveInfo.serviceInfo.name == LeetCodeForcerService::class.java.name }
-}
-
 fun getInstalledApps(context: Context): List<AppInfo> {
     val pm = context.packageManager
     val intent = Intent(Intent.ACTION_MAIN, null).apply { addCategory(Intent.CATEGORY_LAUNCHER) }
