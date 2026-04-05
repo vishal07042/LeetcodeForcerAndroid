@@ -102,12 +102,19 @@ fun MainScreen(modifier: Modifier = Modifier) {
 
     var showAppSelectionFor: String? by remember { mutableStateOf(null) }
     var installedApps by remember { mutableStateOf<List<AppInfo>>(emptyList()) }
-    var startTimeInput by remember { mutableStateOf("09:00") }
-    var endTimeInput by remember { mutableStateOf("11:00") }
-    val selectedDays = remember { mutableStateListOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY) }
-
     var checkStatus by remember { mutableStateOf(LeetCodeManager.getDetailedStatus(context)) }
     var isRefreshing by remember { mutableStateOf(false) }
+
+    var startTimeInput by remember { mutableStateOf("09:00 AM") }
+    var endTimeInput by remember { mutableStateOf("11:00 AM") }
+    val selectedDays = remember { mutableStateListOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY) }
+
+    var showTimePickerFor: String? by remember { mutableStateOf(null) }
+
+    var isFrozen by remember { mutableStateOf(LeetCodeManager.isFrozen(context)) }
+    var isFrozen2 by remember { mutableStateOf(LeetCodeManager.isFrozen2(context)) }
+    var showFreezeWarning by remember { mutableStateOf(false) }
+    var showFreeze2Warning by remember { mutableStateOf(false) }
 
     val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
     val componentName = ComponentName(context, LeetCodeDeviceAdminReceiver::class.java)
@@ -133,6 +140,8 @@ fun MainScreen(modifier: Modifier = Modifier) {
                 solvedToday = LeetCodeManager.getSolvedToday(context)
                 totalSolved = LeetCodeManager.getTotalSolved(context)
                 heatmapData = LeetCodeManager.getHeatmapData(context)
+                isFrozen = LeetCodeManager.isFrozen(context)
+                isFrozen2 = LeetCodeManager.isFrozen2(context)
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -204,12 +213,78 @@ fun MainScreen(modifier: Modifier = Modifier) {
         AppSelectionDialog(
             installedApps = installedApps,
             onDismissRequest = { showAppSelectionFor = null },
-            onAppSelected = { appInfo ->
-                val resultMsg = FocusSettingsManager.addToWhitelist(context, appInfo.packageName)
-                Toast.makeText(context, resultMsg, Toast.LENGTH_SHORT).show()
+            onAppsSelected = { apps ->
+                if (showAppSelectionFor == "whitelist_freeze") {
+                    FocusSettingsManager.clearWhitelist(context)
+                    apps.forEach { app -> FocusSettingsManager.addToWhitelist(context, app.packageName) }
+                    LeetCodeManager.setFrozen2(context, true)
+                    isFrozen2 = true
+                    Toast.makeText(context, "Extreme Mode 2 Active. Solve to unlock.", Toast.LENGTH_LONG).show()
+                } else {
+                    apps.forEach { app -> FocusSettingsManager.addToWhitelist(context, app.packageName) }
+                    Toast.makeText(context, "Added ${apps.size} apps", Toast.LENGTH_SHORT).show()
+                }
                 showAppSelectionFor = null
                 refreshRules()
             }
+        )
+    }
+
+    if (showTimePickerFor != null) {
+        val initialTime = if (showTimePickerFor == "start") startTimeInput else endTimeInput
+        val totalMinutes = parse12HourTime(initialTime) ?: 540 // 9:00 AM
+        val h = totalMinutes / 60
+        val m = totalMinutes % 60
+        
+        EnforcerTimePicker(
+            initialHour = h,
+            initialMinute = m,
+            onDismiss = { showTimePickerFor = null },
+            onConfirm = { hour, minute ->
+                val calendar = Calendar.getInstance()
+                calendar.set(Calendar.HOUR_OF_DAY, hour)
+                calendar.set(Calendar.MINUTE, minute)
+                val amPm = if (calendar.get(Calendar.AM_PM) == Calendar.AM) "AM" else "PM"
+                val h12 = if (calendar.get(Calendar.HOUR) == 0) 12 else calendar.get(Calendar.HOUR)
+                val timeStr = String.format("%d:%02d %s", h12, minute, amPm)
+                
+                if (showTimePickerFor == "start") startTimeInput = timeStr else endTimeInput = timeStr
+                showTimePickerFor = null
+            }
+        )
+    }
+
+    if (showFreezeWarning) {
+        AlertDialog(
+            onDismissRequest = { showFreezeWarning = false },
+            containerColor = SurfaceCard,
+            title = { Text("Activate Extreme Mode 1?", style = Typography.titleLarge, color = ErrorRed) },
+            text = { Text("In Extreme Mode 1, you cannot access this app's settings or ANY of your blocked apps until you solve 1 LeetCode problem today. This app will be LOCKED until you prove you've worked.", style = Typography.bodyLarge) },
+            confirmButton = {
+                EnforcerButton(text = "FREEZE EVERYTHING", onClick = {
+                    LeetCodeManager.setFrozen(context, true)
+                    isFrozen = true
+                    showFreezeWarning = false
+                    Toast.makeText(context, "App Frozen. Work now.", Toast.LENGTH_LONG).show()
+                })
+            },
+            dismissButton = { TextButton(onClick = { showFreezeWarning = false }) { Text("Cancel", style = Typography.bodyLarge) } }
+        )
+    }
+
+    if (showFreeze2Warning) {
+        AlertDialog(
+            onDismissRequest = { showFreeze2Warning = false },
+            containerColor = SurfaceCard,
+            title = { Text("Activate Extreme Mode 2?", style = Typography.titleLarge, color = PrimaryOrange) },
+            text = { Text("Pick your tools for the solve! After selection, the app will enter TOTAL LOCKDOWN. You cannot change settings or whitelist until you solve 1 problem.", style = Typography.bodyLarge) },
+            confirmButton = {
+                EnforcerButton(text = "CHOOSE APPS & FREEZE", onClick = {
+                    showFreeze2Warning = false
+                    showAppSelectionFor = "whitelist_freeze" // Custom logic tag
+                })
+            },
+            dismissButton = { TextButton(onClick = { showFreeze2Warning = false }) { Text("Cancel", style = Typography.bodyLarge) } }
         )
     }
 
@@ -263,7 +338,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
         }
 
         DailyProgressCard(
-            statusText = checkStatus,
+            statusText = if ((isFrozen || isFrozen2) && solvedToday == 0) "FROZEN: SOLVE 1 PROBLEM" else checkStatus,
             streak = streak,
             solvedToday = solvedToday,
             uniqueSolved = uniqueSolved,
@@ -273,9 +348,10 @@ fun MainScreen(modifier: Modifier = Modifier) {
                 isRefreshing = true
                 coroutineScope.launch {
                     LeetCodeManager.checkAndSaveStatus(context)
+                    val newSolvedToday = LeetCodeManager.getSolvedToday(context)
                     checkStatus = LeetCodeManager.getDetailedStatus(context)
                     streak = LeetCodeManager.getStreak(context)
-                    solvedToday = LeetCodeManager.getSolvedToday(context)
+                    solvedToday = newSolvedToday
                     totalSolved = LeetCodeManager.getTotalSolved(context)
                     uniqueSolved = LeetCodeManager.getUniqueSolved(context)
                     heatmapData = LeetCodeManager.getHeatmapData(context)
@@ -284,180 +360,272 @@ fun MainScreen(modifier: Modifier = Modifier) {
             }
         )
 
-        SectionCard(
-            title = "LeetCode Account",
-            subtitle = if (username.isBlank()) "@not_set" else "@$username",
-            icon = Icons.Default.Person,
-            iconColor = PrimaryOrange,
-            iconBg = OrangeDim
-        ) {
-            EnforcerInput(
-                value = usernameDraft,
-                onValueChange = { usernameDraft = it },
-                placeholder = "ENTER USERNAME",
-                modifier = Modifier.fillMaxWidth()
-            )
-            EnforcerButton(
-                text = "SAVE USERNAME",
-                onClick = {
-                    val trimmed = usernameDraft.trim()
-                    if (trimmed.isNotBlank()) {
-                        LeetCodeManager.setUsername(context, trimmed)
-                        username = trimmed
+        val isStrictLocked = (isFrozen || isFrozen2) && solvedToday == 0
+        val isAnyLocked = isStrictLocked 
+
+        if (isStrictLocked) {
+           SectionCard(
+                title = "App Strictly Locked",
+                subtitle = "Solve 1 problem to unlock",
+                icon = Icons.Default.Lock,
+                iconColor = ErrorRed,
+                iconBg = RedDim
+           ) {
+               Text(
+                   text = "Every distracting app and this settings dashboard is currently locked. Finish your first problem of the day to gain access.",
+                   style = Typography.bodyLarge, color = MutedText
+               )
+               Spacer(modifier = Modifier.height(12.dp))
+               EnforcerButton(text = "CHECK PROGRESS", onClick = {
+                    isRefreshing = true
+                    coroutineScope.launch {
+                        LeetCodeManager.checkAndSaveStatus(context)
+                        solvedToday = LeetCodeManager.getSolvedToday(context)
+                        checkStatus = LeetCodeManager.getDetailedStatus(context)
+                        isRefreshing = false
+                    }
+               }, modifier = Modifier.fillMaxWidth())
+               Spacer(modifier = Modifier.height(8.dp))
+               Text("You can still use the Progress card above to refresh your stats.", style = Typography.labelSmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
+           }
+        }
+
+        if (!isStrictLocked) {
+            SectionCard(
+                title = "Extreme Mode 1",
+                subtitle = if (isFrozen) "Active Lockdown" else "Strict - Everything Gated",
+                icon = Icons.Default.Warning,
+                iconColor = if (isFrozen) ErrorRed else MutedText,
+                iconBg = if (isFrozen) RedDim else SurfaceInner
+            ) {
+                if (!isFrozen) {
+                    EnforcerButton(
+                        text = "FREEZE APP & PHONE",
+                        onClick = { showFreezeWarning = true },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else if (solvedToday > 0) {
+                    EnforcerButton(
+                        text = "DEACTIVATE FREEZE",
+                        onClick = {
+                             LeetCodeManager.setFrozen(context, false)
+                             isFrozen = false
+                        },
+                        isOutline = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    StatusBadge("LOCKDOWN ACTIVE", ErrorRed, RedDim)
+                }
+            }
+
+            SectionCard(
+                title = "Extreme Mode 2",
+                subtitle = if (isFrozen2) "Whitelist Active" else "Soft - Settings Gated",
+                icon = Icons.Default.Warning,
+                iconColor = if (isFrozen2) PrimaryOrange else MutedText,
+                iconBg = if (isFrozen2) OrangeDim else SurfaceInner
+            ) {
+                if (!isFrozen2) {
+                    EnforcerButton(
+                        text = "FREEZE SETTINGS ONLY",
+                        onClick = { showFreeze2Warning = true },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else if (solvedToday > 0) {
+                    EnforcerButton(
+                        text = "DEACTIVATE FREEZE 2",
+                        onClick = {
+                             LeetCodeManager.setFrozen2(context, false)
+                             isFrozen2 = false
+                        },
+                        isOutline = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    StatusBadge("LOCKDOWN ACTIVE", PrimaryOrange, OrangeDim)
+                }
+            }
+
+            SectionCard(
+                title = "App Rules",
+                subtitle = "${whitelist.size} whitelisted apps",
+                icon = Icons.Default.List,
+                iconColor = BlueAccent,
+                iconBg = BlueDim
+            ) {
+                EnforcerButton(
+                    text = "+ ADD WHITELIST APP",
+                    onClick = {
+                        val isBlocked = (isAnyLocked || FocusSettingsManager.isFocusSessionActiveNow(context)) && 
+                                        !LeetCodeManager.isSolvedToday(context) && 
+                                        LeetCodeManager.getUsername(context).isNotBlank()
                         
-                        isRefreshing = true
-                        coroutineScope.launch {
-                            LeetCodeManager.checkAndSaveStatus(context)
-                            checkStatus = LeetCodeManager.getDetailedStatus(context)
-                            streak = LeetCodeManager.getStreak(context)
-                            solvedToday = LeetCodeManager.getSolvedToday(context)
-                            totalSolved = LeetCodeManager.getTotalSolved(context)
-                            uniqueSolved = LeetCodeManager.getUniqueSolved(context)
-                            heatmapData = LeetCodeManager.getHeatmapData(context)
-                            isRefreshing = false
-                        }
-                        Toast.makeText(context, "Username updated", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
+                        if (isBlocked) {
+                            Toast.makeText(context, "SOLVE LEETCODE TO EDIT", Toast.LENGTH_SHORT).show()
+                        } else { showAppSelectionFor = "whitelist" }
+                    },
+                    isOutline = false,
+                    modifier = Modifier.fillMaxWidth()
+                )
 
-        SectionCard(
-            title = "App Rules",
-            subtitle = "${whitelist.size} whitelisted apps",
-            icon = Icons.Default.List,
-            iconColor = BlueAccent,
-            iconBg = BlueDim
-        ) {
-            EnforcerButton(
-                text = "+ ADD WHITELIST APP",
-                onClick = {
-                    val isBlocked = FocusSettingsManager.isFocusSessionActiveNow(context) && 
-                                    !LeetCodeManager.isSolvedToday(context) && 
-                                    LeetCodeManager.getUsername(context).isNotBlank()
-                    if (isBlocked) {
-                        Toast.makeText(context, "SOLVE LEETCODE TO EDIT", Toast.LENGTH_SHORT).show()
-                    } else { showAppSelectionFor = "whitelist" }
-                },
-                isOutline = false,
-                modifier = Modifier.fillMaxWidth()
-            )
-
-            if (whitelist.isNotEmpty()) {
-                LabelText("WHITELIST")
-                whitelist.forEach { pkg ->
-                    RuleItemComponent(pkg, "ALLOW", SuccessGreen, GreenDim) {
-                    val isBlocked = FocusSettingsManager.isFocusSessionActiveNow(context) && 
-                                    !LeetCodeManager.isSolvedToday(context) && 
-                                    LeetCodeManager.getUsername(context).isNotBlank()
-                    if (isBlocked) {
-                        Toast.makeText(context, "Solve LeetCode to edit", Toast.LENGTH_SHORT).show()
-                    } else {
-                            FocusSettingsManager.removeFromWhitelist(context, pkg)
-                            refreshRules()
+                if (whitelist.isNotEmpty()) {
+                    LabelText("WHITELIST")
+                    whitelist.forEach { pkg ->
+                        RuleItemComponent(pkg, "ALLOW", SuccessGreen, GreenDim) {
+                            val isBlocked = (isAnyLocked || FocusSettingsManager.isFocusSessionActiveNow(context)) && 
+                                            !LeetCodeManager.isSolvedToday(context) && 
+                                            LeetCodeManager.getUsername(context).isNotBlank()
+                            
+                            if (isBlocked) {
+                                Toast.makeText(context, "Solve LeetCode to edit", Toast.LENGTH_SHORT).show()
+                            } else {
+                                FocusSettingsManager.removeFromWhitelist(context, pkg)
+                                refreshRules()
+                            }
                         }
                     }
                 }
             }
         }
 
-        SectionCard(
-            title = "Focus Sessions",
-            subtitle = if (sessions.isEmpty()) "24/7 Always Active" else "${sessions.size} session active",
-            icon = Icons.Default.Build,
-            iconColor = PurpleAccent,
-            iconBg = PurpleDim,
-            headerAction = {
-                TextButton(onClick = { showFocusInfoDialog = true }) {
-                    Icon(Icons.Default.Info, contentDescription = null, tint = MutedText, modifier = Modifier.size(18.dp))
-                }
-            }
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+        if (!isAnyLocked) {
+            SectionCard(
+                title = "LeetCode Account",
+                subtitle = if (username.isBlank()) "@not_set" else "@$username",
+                icon = Icons.Default.Person,
+                iconColor = PrimaryOrange,
+                iconBg = OrangeDim
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    LabelText("START")
-                    EnforcerInput(value = startTimeInput, onValueChange = { startTimeInput = it }, placeholder = "00:00", textAlign = TextAlign.Center)
-                }
-                Icon(Icons.Default.ArrowForward, contentDescription = null, tint = MutedText, modifier = Modifier.padding(top = 16.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    LabelText("END")
-                    EnforcerInput(value = endTimeInput, onValueChange = { endTimeInput = it }, placeholder = "00:00", textAlign = TextAlign.Center)
-                }
+                EnforcerInput(
+                    value = usernameDraft,
+                    onValueChange = { usernameDraft = it },
+                    placeholder = "ENTER USERNAME",
+                    modifier = Modifier.fillMaxWidth()
+                )
+                EnforcerButton(
+                    text = "SAVE USERNAME",
+                    onClick = {
+                        val trimmed = usernameDraft.trim()
+                        if (trimmed.isNotBlank()) {
+                            LeetCodeManager.setUsername(context, trimmed)
+                            username = trimmed
+                            
+                            isRefreshing = true
+                            coroutineScope.launch {
+                                LeetCodeManager.checkAndSaveStatus(context)
+                                checkStatus = LeetCodeManager.getDetailedStatus(context)
+                                streak = LeetCodeManager.getStreak(context)
+                                solvedToday = LeetCodeManager.getSolvedToday(context)
+                                totalSolved = LeetCodeManager.getTotalSolved(context)
+                                uniqueSolved = LeetCodeManager.getUniqueSolved(context)
+                                heatmapData = LeetCodeManager.getHeatmapData(context)
+                                isRefreshing = false
+                            }
+                            Toast.makeText(context, "Username updated", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
-            LabelText("ACTIVE DAYS")
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+            SectionCard(
+                title = "Focus Sessions",
+                subtitle = if (sessions.isEmpty()) "24/7 Always Active" else "${sessions.size} session active",
+                icon = Icons.Default.Build,
+                iconColor = PurpleAccent,
+                iconBg = PurpleDim,
+                headerAction = {
+                    TextButton(onClick = { showFocusInfoDialog = true }) {
+                        Icon(Icons.Default.Info, contentDescription = null, tint = MutedText, modifier = Modifier.size(18.dp))
+                    }
+                }
             ) {
-                val days = listOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY, Calendar.SATURDAY, Calendar.SUNDAY)
-                val labels = listOf("M", "T", "W", "Th", "F", "Sa", "Su")
-                days.forEachIndexed { index, day ->
-                    val active = selectedDays.contains(day)
-                    DayChip(labels[index], active) {
-                        if (active) selectedDays.remove(day) else selectedDays.add(day)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        LabelText("START")
+                        TimeSelectionChip(startTimeInput) { showTimePickerFor = "start" }
+                    }
+                    Icon(Icons.Default.ArrowForward, contentDescription = null, tint = MutedText, modifier = Modifier.padding(top = 16.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        LabelText("END")
+                        TimeSelectionChip(endTimeInput) { showTimePickerFor = "end" }
                     }
                 }
-            }
 
-            EnforcerButton(
-                text = "ADD FOCUS SESSION",
-                onClick = {
-                    if (FocusSettingsManager.isFocusSessionActiveNow(context) && !LeetCodeManager.isSolvedToday(context)) {
-                        Toast.makeText(context, "SOLVE LEETCODE TO EDIT", Toast.LENGTH_SHORT).show()
-                        return@EnforcerButton
+                LabelText("ACTIVE DAYS")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    val days = listOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY, Calendar.SATURDAY, Calendar.SUNDAY)
+                    val labels = listOf("M", "T", "W", "Th", "F", "Sa", "Su")
+                    days.forEachIndexed { index, day ->
+                        val active = selectedDays.contains(day)
+                        DayChip(labels[index], active) {
+                            if (active) selectedDays.remove(day) else selectedDays.add(day)
+                        }
                     }
-                    val start = parseHourMinute(startTimeInput)
-                    val end = parseHourMinute(endTimeInput)
-                    if (start == null || end == null || selectedDays.isEmpty()) {
-                        Toast.makeText(context, "Invalid input", Toast.LENGTH_SHORT).show()
-                        return@EnforcerButton
-                    }
-                    FocusSettingsManager.addSession(context, FocusSession(System.currentTimeMillis(), selectedDays.toSet(), start, end))
-                    refreshRules()
-                },
-                modifier = Modifier.fillMaxWidth()
-            )
+                }
 
-            if (sessions.isNotEmpty()) {
-                Divider(color = BorderSubtle, thickness = 1.dp)
-                sessions.forEach { session ->
-                    SessionItemComponent(session) {
+                EnforcerButton(
+                    text = "ADD FOCUS SESSION",
+                    onClick = {
                         if (FocusSettingsManager.isFocusSessionActiveNow(context) && !LeetCodeManager.isSolvedToday(context)) {
-                            Toast.makeText(context, "Solve LeetCode to edit", Toast.LENGTH_SHORT).show()
-                        } else {
-                            FocusSettingsManager.removeSession(context, session.id)
-                            refreshRules()
+                            Toast.makeText(context, "SOLVE LEETCODE TO EDIT", Toast.LENGTH_SHORT).show()
+                            return@EnforcerButton
+                        }
+                        val start = parse12HourTime(startTimeInput)
+                        val end = parse12HourTime(endTimeInput)
+                        if (start == null || end == null || selectedDays.isEmpty()) {
+                            Toast.makeText(context, "Invalid input", Toast.LENGTH_SHORT).show()
+                            return@EnforcerButton
+                        }
+                        FocusSettingsManager.addSession(context, FocusSession(System.currentTimeMillis(), selectedDays.toSet(), start, end))
+                        refreshRules()
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (sessions.isNotEmpty()) {
+                    Divider(color = BorderSubtle, thickness = 1.dp)
+                    sessions.forEach { session ->
+                        SessionItemComponent(session) {
+                            if (FocusSettingsManager.isFocusSessionActiveNow(context) && !LeetCodeManager.isSolvedToday(context)) {
+                                Toast.makeText(context, "Solve LeetCode to edit", Toast.LENGTH_SHORT).show()
+                            } else {
+                                FocusSettingsManager.removeSession(context, session.id)
+                                refreshRules()
+                            }
                         }
                     }
                 }
             }
-        }
 
-        SectionCard(
-            title = "Security",
-            subtitle = if (isAdminActive) "Anti-Uninstall Active" else "Protection Disabled",
-            icon = Icons.Default.Lock,
-            iconColor = ErrorRed,
-            iconBg = RedDim
-        ) {
-            EnforcerButton(
-                text = if (isAdminActive) "SETTINGS ACCESS LOCKED" else "PREVENT UNINSTALL",
-                onClick = {
-                    if (isAdminActive) {
-                        context.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
-                    } else {
-                        showAdminDialog = true
-                    }
-                },
-                isOutline = isAdminActive,
-                modifier = Modifier.fillMaxWidth()
-            )
+            SectionCard(
+                title = "Security",
+                subtitle = if (isAdminActive) "Anti-Uninstall Active" else "Protection Disabled",
+                icon = Icons.Default.Lock,
+                iconColor = ErrorRed,
+                iconBg = RedDim
+            ) {
+                EnforcerButton(
+                    text = if (isAdminActive) "SETTINGS ACCESS LOCKED" else "PREVENT UNINSTALL",
+                    onClick = {
+                        if (isAdminActive) {
+                            context.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                        } else {
+                            showAdminDialog = true
+                        }
+                    },
+                    isOutline = isAdminActive,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
         }
         
         Spacer(modifier = Modifier.height(20.dp))
@@ -546,7 +714,7 @@ fun ServiceStatusCard(enabled: Boolean, onEnable: () -> Unit) {
             }
             
             if (enabled) {
-                StatusBadge("✓ Live", SuccessGreen, GreenDim)
+                StatusBadge("\u2713 Live", SuccessGreen, GreenDim)
             } else {
                 EnforcerButton(text = "ENABLE", isSmall = true, onClick = onEnable)
             }
@@ -582,7 +750,7 @@ fun DailyProgressCard(statusText: String, streak: Int, solvedToday: Int, uniqueS
                         Text("$streak", style = Typography.headlineLarge)
                         Spacer(modifier = Modifier.weight(1f))
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("🔥", fontSize = 14.sp)
+                            Text("\ud83d\udd25", fontSize = 14.sp)
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Day streak", style = Typography.labelSmall)
                         }
@@ -655,7 +823,7 @@ fun SectionCard(title: String, subtitle: String, icon: ImageVector, iconColor: C
                 }
                 headerAction?.invoke()
             }
-            Divider(color = BorderSubtle, thickness = 1.dp)
+            HorizontalDivider(color = BorderSubtle, thickness = 1.dp)
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 content()
             }
@@ -812,42 +980,86 @@ private fun formatDays(days: Set<Int>): String {
     return days.sorted().joinToString(", ") { dayShort(it) }
 }
 
-private fun parseHourMinute(value: String): Int? {
-    val parts = value.trim().split(":")
-    if (parts.size != 2) return null
-    val hour = parts[0].toIntOrNull() ?: return null
-    val minute = parts[1].toIntOrNull() ?: return null
-    if (hour !in 0..23 || minute !in 0..59) return null
-    return hour * 60 + minute
+private fun parse12HourTime(time: String): Int? {
+    return try {
+        val parts = time.split(":")
+        if (parts.size != 2) return null
+        val hour12 = parts[0].trim().toInt()
+        val mAndP = parts[1].trim().split(" ")
+        if (mAndP.size != 2) return null
+        val minute = mAndP[0].trim().toInt()
+        val amPm = mAndP[1].trim().uppercase()
+        
+        var hour24 = if (amPm == "PM" && hour12 < 12) hour12 + 12 else hour12
+        if (amPm == "AM" && hour12 == 12) hour24 = 0
+        if (amPm == "PM" && hour12 == 12) hour24 = 12
+        
+        hour24 * 60 + minute
+    } catch (e: Exception) {
+        null
+    }
 }
 
 private fun formatMinute(totalMinutes: Int): String {
-    val h = totalMinutes / 60
+    val h24 = totalMinutes / 60
     val m = totalMinutes % 60
-    return "%02d:%02d".format(h, m)
+    val amPm = if (h24 < 12) "AM" else "PM"
+    val h12 = when {
+        h24 == 0 -> 12
+        h24 > 12 -> h24 - 12
+        else -> h24
+    }
+    return "%d:%02d %s".format(h12, m, amPm)
 }
 
 data class AppInfo(val name: String, val packageName: String)
 
 @Composable
-fun AppSelectionDialog(installedApps: List<AppInfo>, onDismissRequest: () -> Unit, onAppSelected: (AppInfo) -> Unit) {
+fun AppSelectionDialog(installedApps: List<AppInfo>, onDismissRequest: () -> Unit, onAppsSelected: (List<AppInfo>) -> Unit) {
     var searchQuery by remember { mutableStateOf("") }
+    val selectedApps = remember { mutableStateListOf<AppInfo>() }
+    
     val filteredApps = if (searchQuery.isBlank()) installedApps else installedApps.filter { it.name.contains(searchQuery, ignoreCase = true) || it.packageName.contains(searchQuery, ignoreCase = true) }
 
     AlertDialog(
         onDismissRequest = onDismissRequest,
         containerColor = SurfaceCard,
-        confirmButton = { TextButton(onClick = onDismissRequest) { Text("CLOSE", style = Typography.bodyLarge.copy(color = PrimaryOrange)) } },
+        confirmButton = { 
+            EnforcerButton(
+                text = "DONE (${selectedApps.size})", 
+                onClick = { onAppsSelected(selectedApps.toList()) },
+                isSmall = true
+            ) 
+        },
+        dismissButton = {
+            TextButton(onClick = onDismissRequest) { Text("CANCEL", style = Typography.labelLarge.copy(color = MutedText)) }
+        },
         title = {
             EnforcerInput(value = searchQuery, onValueChange = { searchQuery = it }, placeholder = "SEARCH APPS...", modifier = Modifier.fillMaxWidth())
         },
         text = {
             LazyColumn(modifier = Modifier.fillMaxWidth().height(400.dp)) {
                 items(filteredApps) { app ->
+                    val isChecked = selectedApps.contains(app)
                     Row(
-                        modifier = Modifier.fillMaxWidth().clickable { onAppSelected(app) }.padding(vertical = 12.dp, horizontal = 8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { 
+                                if (isChecked) selectedApps.remove(app) else selectedApps.add(app)
+                            }
+                            .padding(vertical = 8.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Checkbox(
+                            checked = isChecked,
+                            onCheckedChange = null,
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = PrimaryOrange,
+                                uncheckedColor = MutedText,
+                                checkmarkColor = Background
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(text = app.name, style = Typography.bodyLarge.copy(fontWeight = FontWeight.Bold))
                             Text(text = app.packageName, style = Typography.labelSmall)
@@ -857,4 +1069,79 @@ fun AppSelectionDialog(installedApps: List<AppInfo>, onDismissRequest: () -> Uni
             }
         }
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EnforcerTimePicker(
+    initialHour: Int,
+    initialMinute: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int, Int) -> Unit
+) {
+    val state = rememberTimePickerState(
+        initialHour = initialHour,
+        initialMinute = initialMinute,
+        is24Hour = false
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = SurfaceCard,
+        title = { Text("SELECT TIME", style = Typography.titleMedium, color = BodyWhite) },
+        text = {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxWidth()) {
+                TimePicker(
+                    state = state,
+                    colors = TimePickerDefaults.colors(
+                        clockDialColor = SurfaceInner,
+                        clockDialSelectedContentColor = Color.Black,
+                        clockDialUnselectedContentColor = BodyWhite,
+                        selectorColor = PrimaryOrange,
+                        periodSelectorBorderColor = PrimaryOrange,
+                        periodSelectorSelectedContainerColor = PrimaryOrange,
+                        periodSelectorUnselectedContainerColor = SurfaceInner,
+                        periodSelectorSelectedContentColor = Color.Black,
+                        periodSelectorUnselectedContentColor = MutedText,
+                        timeSelectorSelectedContainerColor = PrimaryOrange.copy(alpha = 0.2f),
+                        timeSelectorUnselectedContainerColor = SurfaceInner,
+                        timeSelectorSelectedContentColor = PrimaryOrange,
+                        timeSelectorUnselectedContentColor = BodyWhite
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            EnforcerButton(text = "SET", onClick = { onConfirm(state.hour, state.minute) })
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("CANCEL", style = Typography.labelLarge, color = MutedText)
+            }
+        }
+    )
+}
+
+@Composable
+fun TimeSelectionChip(time: String, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(SurfaceInner)
+            .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = time,
+            style = Typography.bodyLarge.copy(
+                fontFamily = JetBrainsMono,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.sp
+            ),
+            color = PrimaryOrange
+        )
+    }
 }

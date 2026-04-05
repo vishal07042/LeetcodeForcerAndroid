@@ -7,7 +7,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 // Monospace For Labels
-private val JetBrainsMono = FontFamily.Monospace
+val JetBrainsMono = FontFamily.Monospace
 
 val Typography = Typography(
     displayMedium = TextStyle(

@@ -63,19 +63,31 @@ class LeetCodeForcerService : AccessibilityService() {
             }
         }
 
+        val isFrozen = LeetCodeManager.isFrozen(this)
+        val isFrozen2 = LeetCodeManager.isFrozen2(this)
+        val solved = LeetCodeManager.isSolvedToday(this)
+
+        // If frozen and not solved, we enforce 24/7 (ignore sessions)
+        if ((isFrozen || isFrozen2) && !solved) {
+            if (!isPackageAllowedWhenLocked(packageName)) {
+                blockPackage(packageName, "Extreme Mode: Solve LeetCode to unlock")
+            }
+            return
+        }
+
         if (!FocusSettingsManager.isFocusSessionActiveNow(this)) {
             return
         }
 
-        if (LeetCodeManager.isSolvedToday(this)) {
+        if (solved) {
             return
         }
 
         if (!isPackageAllowedWhenLocked(packageName)) {
-            blockPackage(packageName, "Solve today on LeetCode to unlock")
+            blockPackage(packageName, "Solve a question  on LeetCode to unlock")
         }
     }
-
+ 
     override fun onInterrupt() {
         Log.i(TAG, "Service interrupted")
     }

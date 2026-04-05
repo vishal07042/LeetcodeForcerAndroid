@@ -22,6 +22,8 @@ object LeetCodeManager {
     private const val KEY_UNIQUE_SOLVED = "uniqueSolved"
     private const val KEY_CACHED_UTC_DATE = "cached_utc_date"
     private const val KEY_CACHED_UTC_DATE_AT = "cached_utc_date_at"
+    private const val KEY_IS_FROZEN = "is_frozen"
+    private const val KEY_IS_FROZEN_2 = "is_frozen_2"
     private const val DATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000L
     private const val TIME_API_URL = "https://gettimeapi.dev/v1/time"
 
@@ -58,6 +60,26 @@ object LeetCodeManager {
         val lastSolvedDate = prefs.getString(KEY_LAST_SOLVED_DATE, null)
         val today = getTodayDateString(context)
         return lastSolvedDate == today
+    }
+
+    fun isFrozen(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_IS_FROZEN, false)
+    }
+
+    fun setFrozen(context: Context, frozen: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_IS_FROZEN, frozen).apply()
+    }
+
+    fun isFrozen2(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_IS_FROZEN_2, false)
+    }
+
+    fun setFrozen2(context: Context, frozen: Boolean) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_IS_FROZEN_2, frozen).apply()
     }
 
     fun isSolvedToday5(context: Context): Boolean {

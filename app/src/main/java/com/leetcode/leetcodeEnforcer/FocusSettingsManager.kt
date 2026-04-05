@@ -21,6 +21,7 @@ object FocusSettingsManager {
         "com.google.android.permissioncontroller",
         "com.google.android.gms",
         "com.android.vending",
+        "com.leetcode.leetcodeEnforcer",
         "com.google.android.inputmethod.latin",
         // "com.whatsapp",
         "com.miui.securityadd",
@@ -79,6 +80,11 @@ object FocusSettingsManager {
         if (whitelist.remove(pkg)) {
             persistLists(context, whitelist)
         }
+    }
+
+    fun clearWhitelist(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().remove(KEY_WHITELIST).apply()
     }
 
     fun getSessions(context: Context): List<FocusSession> {
