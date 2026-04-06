@@ -147,6 +147,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
     val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
     val componentName = ComponentName(context, LeetCodeDeviceAdminReceiver::class.java)
     var isAdminActive by remember { mutableStateOf(dpm.isAdminActive(componentName)) }
+    var isPreventUninstallEnabled by remember { mutableStateOf(LeetCodeManager.isPreventUninstallEnabled(context)) }
     var showAdminDialog by remember { mutableStateOf(false) }
     var showFocusInfoDialog by remember { mutableStateOf(false) }
     val activeSessionNow = FocusSettingsManager.getActiveSessionNow(context)
@@ -155,7 +156,12 @@ fun MainScreen(modifier: Modifier = Modifier) {
     fun refreshRules() {
         whitelist = FocusSettingsManager.getWhitelist(context).toList().sorted()
         sessions = FocusSettingsManager.getSessions(context)
-        isAdminActive = dpm.isAdminActive(componentName)
+        val adminActive = dpm.isAdminActive(componentName)
+        isAdminActive = adminActive
+        if (LeetCodeManager.isPreventUninstallEnabled(context) != adminActive) {
+            LeetCodeManager.setPreventUninstallEnabled(context, adminActive)
+        }
+        isPreventUninstallEnabled = adminActive
     }
 
     DisposableEffect(lifecycleOwner) {
@@ -326,6 +332,8 @@ fun MainScreen(modifier: Modifier = Modifier) {
             confirmButton = {
                 Button(onClick = {
                     showAdminDialog = false
+                    LeetCodeManager.setPreventUninstallEnabled(context, true)
+                    isPreventUninstallEnabled = true
                     val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
                         putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, componentName)
                         putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Enabling this will prevent the app from being uninstalled, enforcing focus.")
@@ -343,9 +351,9 @@ fun MainScreen(modifier: Modifier = Modifier) {
             title = { Text("Focus Engine", style = Typography.titleLarge) },
             text = {
                 Text(
-                    "• Active: Rules enforced.\n" +
-                    "• Free: Blocker sleeps.\n" +
-                    "• Empty: 24/7 Hard Enforcement.",
+                    "- Active: A focus session is running, so rules are enforced now.\n" +
+                    "- Free: No focus session is active right now.\n" +
+                    "- Empty: No focus sessions are set up yet.",
                     style = Typography.bodyLarge
                 )
             },
@@ -576,7 +584,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
 
             SectionCard(
                 title = "Focus Sessions",
-                subtitle = if (sessions.isEmpty()) "24/7 Always Active" else "${sessions.size} session active",
+                subtitle = if (sessions.isEmpty()) "No sessions configured" else "${sessions.size} session configured",
                 icon = Icons.Default.Build,
                 iconColor = PurpleAccent,
                 iconBg = PurpleDim,
@@ -652,21 +660,21 @@ fun MainScreen(modifier: Modifier = Modifier) {
             
             SectionCard(
                 title = "Security",
-                subtitle = if (isAdminActive) "Anti-Uninstall Active" else "Protection Disabled",
+                subtitle = if (isPreventUninstallEnabled && isAdminActive) "Anti-Uninstall Active" else "Protection Disabled",
                 icon = Icons.Default.Lock,
                 iconColor = ErrorRed,
                 iconBg = RedDim
             ) {
                 EnforcerButton(
-                    text = if (isAdminActive) "SETTINGS ACCESS LOCKED" else "PREVENT UNINSTALL",
+                    text = if (isPreventUninstallEnabled && isAdminActive) "SETTINGS ACCESS LOCKED" else "PREVENT UNINSTALL",
                     onClick = {
-                        if (isAdminActive) {
+                        if (isPreventUninstallEnabled && isAdminActive) {
                             context.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS))
                         } else {
                             showAdminDialog = true
                         }
                     },
-                    isOutline = isAdminActive,
+                    isOutline = isPreventUninstallEnabled && isAdminActive,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
