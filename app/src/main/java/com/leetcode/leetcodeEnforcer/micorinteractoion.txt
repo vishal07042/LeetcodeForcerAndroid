@@ -1,3 +1,6 @@
+Password: 123456
+
+
 package com.leetcode.leetcodeEnforcer
 
 import androidx.compose.animation.AnimatedContent

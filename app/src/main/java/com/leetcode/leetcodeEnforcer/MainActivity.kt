@@ -14,12 +14,25 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -36,11 +49,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -48,13 +69,16 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.leetcode.leetcodeEnforcer.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Calendar
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,10 +108,12 @@ fun MainScreen(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val coroutineScope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
 
     var isServiceEnabled by remember { mutableStateOf(isAccessibilityServiceEnabled(context)) }
     var username by remember { mutableStateOf(LeetCodeManager.getUsername(context)) }
     var usernameDraft by remember { mutableStateOf(username) }
+    var usernameSaveSuccessKey by remember { mutableIntStateOf(0) }
 
     var streak by remember { mutableStateOf(LeetCodeManager.getStreak(context)) }
     var solvedToday by remember { mutableStateOf(LeetCodeManager.getSolvedToday(context)) }
@@ -110,6 +136,8 @@ fun MainScreen(modifier: Modifier = Modifier) {
     val selectedDays = remember { mutableStateListOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY) }
 
     var showTimePickerFor: String? by remember { mutableStateOf(null) }
+    var addSessionSuccessKey by remember { mutableIntStateOf(0) }
+    var latestAddedSessionId by remember { mutableStateOf<Long?>(null) }
 
     var isFrozen by remember { mutableStateOf(LeetCodeManager.isFrozen(context)) }
     var isFrozen2 by remember { mutableStateOf(LeetCodeManager.isFrozen2(context)) }
@@ -121,6 +149,8 @@ fun MainScreen(modifier: Modifier = Modifier) {
     var isAdminActive by remember { mutableStateOf(dpm.isAdminActive(componentName)) }
     var showAdminDialog by remember { mutableStateOf(false) }
     var showFocusInfoDialog by remember { mutableStateOf(false) }
+    val activeSessionNow = FocusSettingsManager.getActiveSessionNow(context)
+    val isActiveSessionRunning = activeSessionNow != null
 
     fun refreshRules() {
         whitelist = FocusSettingsManager.getWhitelist(context).toList().sorted()
@@ -323,47 +353,48 @@ fun MainScreen(modifier: Modifier = Modifier) {
         )
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        HeaderSection()
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            HeaderSection(serviceEnabled = isServiceEnabled)
 
-        ServiceStatusCard(isServiceEnabled) {
-            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            context.startActivity(intent)
-        }
-
-        DailyProgressCard(
-            statusText = if ((isFrozen || isFrozen2) && solvedToday == 0) "FROZEN: SOLVE 1 PROBLEM" else checkStatus,
-            streak = streak,
-            solvedToday = solvedToday,
-            uniqueSolved = uniqueSolved,
-            heatmapData = heatmapData,
-            isRefreshing = isRefreshing,
-            onRefresh = {
-                isRefreshing = true
-                coroutineScope.launch {
-                    LeetCodeManager.checkAndSaveStatus(context)
-                    val newSolvedToday = LeetCodeManager.getSolvedToday(context)
-                    checkStatus = LeetCodeManager.getDetailedStatus(context)
-                    streak = LeetCodeManager.getStreak(context)
-                    solvedToday = newSolvedToday
-                    totalSolved = LeetCodeManager.getTotalSolved(context)
-                    uniqueSolved = LeetCodeManager.getUniqueSolved(context)
-                    heatmapData = LeetCodeManager.getHeatmapData(context)
-                    isRefreshing = false
-                }
+            ServiceStatusCard(isServiceEnabled) {
+                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                context.startActivity(intent)
             }
-        )
+
+            DailyProgressCard(
+                statusText = if ((isFrozen || isFrozen2) && solvedToday == 0) "FROZEN: SOLVE 1 PROBLEM" else checkStatus,
+                streak = streak,
+                solvedToday = solvedToday,
+                uniqueSolved = uniqueSolved,
+                heatmapData = heatmapData,
+                isRefreshing = isRefreshing,
+                onRefresh = {
+                    isRefreshing = true
+                    coroutineScope.launch {
+                        LeetCodeManager.checkAndSaveStatus(context)
+                        val newSolvedToday = LeetCodeManager.getSolvedToday(context)
+                        checkStatus = LeetCodeManager.getDetailedStatus(context)
+                        streak = LeetCodeManager.getStreak(context)
+                        solvedToday = newSolvedToday
+                        totalSolved = LeetCodeManager.getTotalSolved(context)
+                        uniqueSolved = LeetCodeManager.getUniqueSolved(context)
+                        heatmapData = LeetCodeManager.getHeatmapData(context)
+                        isRefreshing = false
+                    }
+                }
+            )
 
         val isStrictLocked = (isFrozen || isFrozen2) && solvedToday == 0
         val isAnyLocked = isStrictLocked 
 
-        if (isStrictLocked) {
+            if (isStrictLocked) {
            SectionCard(
                 title = "App Strictly Locked",
                 subtitle = "Solve 1 problem to unlock",
@@ -390,7 +421,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
            }
         }
 
-        if (!isStrictLocked) {
+            if (!isStrictLocked) {
             SectionCard(
                 title = "Extreme Mode 1",
                 subtitle = if (isFrozen) "Active Lockdown" else "Strict - Everything Gated",
@@ -399,9 +430,11 @@ fun MainScreen(modifier: Modifier = Modifier) {
                 iconBg = if (isFrozen) RedDim else SurfaceInner
             ) {
                 if (!isFrozen) {
-                    EnforcerButton(
-                        text = "FREEZE APP & PHONE",
-                        onClick = { showFreezeWarning = true },
+                    SwipeActivateControl(
+                        text = "SWIPE TO ACTIVATE",
+                        accentColor = ErrorRed,
+                        accentBackground = RedDim,
+                        onActivated = { showFreezeWarning = true },
                         modifier = Modifier.fillMaxWidth()
                     )
                 } else if (solvedToday > 0) {
@@ -427,9 +460,11 @@ fun MainScreen(modifier: Modifier = Modifier) {
                 iconBg = if (isFrozen2) OrangeDim else SurfaceInner
             ) {
                 if (!isFrozen2) {
-                    EnforcerButton(
-                        text = "FREEZE SETTINGS ONLY",
-                        onClick = { showFreeze2Warning = true },
+                    SwipeActivateControl(
+                        text = "SWIPE TO ACTIVATE",
+                        accentColor = PrimaryOrange,
+                        accentBackground = OrangeDim,
+                        onActivated = { showFreeze2Warning = true },
                         modifier = Modifier.fillMaxWidth()
                     )
                 } else if (solvedToday > 0) {
@@ -457,13 +492,17 @@ fun MainScreen(modifier: Modifier = Modifier) {
                 EnforcerButton(
                     text = "+ ADD WHITELIST APP",
                     onClick = {
-                        val isBlocked = (isAnyLocked || FocusSettingsManager.isFocusSessionActiveNow(context)) && 
-                                        !LeetCodeManager.isSolvedToday(context) && 
-                                        LeetCodeManager.getUsername(context).isNotBlank()
-                        
-                        if (isBlocked) {
-                            Toast.makeText(context, "SOLVE LEETCODE TO EDIT", Toast.LENGTH_SHORT).show()
-                        } else { showAppSelectionFor = "whitelist" }
+                        if (isActiveSessionRunning) {
+                            Toast.makeText(context, "Cannot edit whitelist during an active focus session", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val isBlocked = isAnyLocked &&
+                                !LeetCodeManager.isSolvedToday(context) &&
+                                LeetCodeManager.getUsername(context).isNotBlank()
+
+                            if (isBlocked) {
+                                Toast.makeText(context, "SOLVE LEETCODE TO EDIT", Toast.LENGTH_SHORT).show()
+                            } else { showAppSelectionFor = "whitelist" }
+                        }
                     },
                     isOutline = false,
                     modifier = Modifier.fillMaxWidth()
@@ -471,17 +510,21 @@ fun MainScreen(modifier: Modifier = Modifier) {
 
                 if (whitelist.isNotEmpty()) {
                     LabelText("WHITELIST")
-                    whitelist.forEach { pkg ->
-                        RuleItemComponent(pkg, "ALLOW", SuccessGreen, GreenDim) {
-                            val isBlocked = (isAnyLocked || FocusSettingsManager.isFocusSessionActiveNow(context)) && 
-                                            !LeetCodeManager.isSolvedToday(context) && 
-                                            LeetCodeManager.getUsername(context).isNotBlank()
-                            
-                            if (isBlocked) {
-                                Toast.makeText(context, "Solve LeetCode to edit", Toast.LENGTH_SHORT).show()
+                    whitelist.forEachIndexed { index, pkg ->
+                        RuleItemComponent(pkg, "ALLOW", SuccessGreen, GreenDim, listIndex = index) {
+                            if (isActiveSessionRunning) {
+                                Toast.makeText(context, "Cannot edit whitelist during an active focus session", Toast.LENGTH_SHORT).show()
                             } else {
-                                FocusSettingsManager.removeFromWhitelist(context, pkg)
-                                refreshRules()
+                                val isBlocked = isAnyLocked &&
+                                    !LeetCodeManager.isSolvedToday(context) &&
+                                    LeetCodeManager.getUsername(context).isNotBlank()
+
+                                if (isBlocked) {
+                                    Toast.makeText(context, "Solve LeetCode to edit", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    FocusSettingsManager.removeFromWhitelist(context, pkg)
+                                    refreshRules()
+                                }
                             }
                         }
                     }
@@ -501,7 +544,8 @@ fun MainScreen(modifier: Modifier = Modifier) {
                     value = usernameDraft,
                     onValueChange = { usernameDraft = it },
                     placeholder = "ENTER USERNAME",
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    saveSuccessKey = usernameSaveSuccessKey
                 )
                 EnforcerButton(
                     text = "SAVE USERNAME",
@@ -510,7 +554,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
                         if (trimmed.isNotBlank()) {
                             LeetCodeManager.setUsername(context, trimmed)
                             username = trimmed
-                            
+
                             isRefreshing = true
                             coroutineScope.launch {
                                 LeetCodeManager.checkAndSaveStatus(context)
@@ -522,6 +566,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
                                 heatmapData = LeetCodeManager.getHeatmapData(context)
                                 isRefreshing = false
                             }
+                            usernameSaveSuccessKey++
                             Toast.makeText(context, "Username updated", Toast.LENGTH_SHORT).show()
                         }
                     },
@@ -572,31 +617,30 @@ fun MainScreen(modifier: Modifier = Modifier) {
                     }
                 }
 
-                EnforcerButton(
-                    text = "ADD FOCUS SESSION",
+                AddScheduleMorphButton(
                     onClick = {
-                        if (FocusSettingsManager.isFocusSessionActiveNow(context) && !LeetCodeManager.isSolvedToday(context)) {
-                            Toast.makeText(context, "SOLVE LEETCODE TO EDIT", Toast.LENGTH_SHORT).show()
-                            return@EnforcerButton
-                        }
                         val start = parse12HourTime(startTimeInput)
                         val end = parse12HourTime(endTimeInput)
                         if (start == null || end == null || selectedDays.isEmpty()) {
                             Toast.makeText(context, "Invalid input", Toast.LENGTH_SHORT).show()
-                            return@EnforcerButton
+                            return@AddScheduleMorphButton
                         }
-                        FocusSettingsManager.addSession(context, FocusSession(System.currentTimeMillis(), selectedDays.toSet(), start, end))
+                        val newSession = FocusSession(System.currentTimeMillis(), selectedDays.toSet(), start, end)
+                        FocusSettingsManager.addSession(context, newSession)
+                        latestAddedSessionId = newSession.id
+                        addSessionSuccessKey++
                         refreshRules()
                     },
+                    morphToCheckKey = addSessionSuccessKey,
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 if (sessions.isNotEmpty()) {
                     Divider(color = BorderSubtle, thickness = 1.dp)
                     sessions.forEach { session ->
-                        SessionItemComponent(session) {
-                            if (FocusSettingsManager.isFocusSessionActiveNow(context) && !LeetCodeManager.isSolvedToday(context)) {
-                                Toast.makeText(context, "Solve LeetCode to edit", Toast.LENGTH_SHORT).show()
+                        SessionItemComponent(session, playSlideIn = latestAddedSessionId == session.id) {
+                            if (activeSessionNow?.id == session.id) {
+                                Toast.makeText(context, "Cannot remove the currently active focus session", Toast.LENGTH_SHORT).show()
                             } else {
                                 FocusSettingsManager.removeSession(context, session.id)
                                 refreshRules()
@@ -605,7 +649,7 @@ fun MainScreen(modifier: Modifier = Modifier) {
                     }
                 }
             }
-
+            
             SectionCard(
                 title = "Security",
                 subtitle = if (isAdminActive) "Anti-Uninstall Active" else "Protection Disabled",
@@ -628,29 +672,70 @@ fun MainScreen(modifier: Modifier = Modifier) {
             }
         }
         
-        Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(20.dp))
+        }
+
+        CollapsedToolbarOverlay(
+            scrollY = scrollState.value,
+            serviceEnabled = isServiceEnabled,
+            modifier = Modifier.align(Alignment.TopCenter)
+        )
     }
 }
 
 @Composable
-fun HeaderSection() {
+fun HeaderSection(serviceEnabled: Boolean) {
+    val badgeBg by animateColorAsState(
+        targetValue = if (serviceEnabled) OrangeDim else RedDim,
+        animationSpec = tween(260),
+        label = "header-badge-bg"
+    )
+    val badgeBorder by animateColorAsState(
+        targetValue = if (serviceEnabled) OrangeGlow else ErrorRed.copy(alpha = 0.4f),
+        animationSpec = tween(260),
+        label = "header-badge-border"
+    )
+    val badgeTextColor by animateColorAsState(
+        targetValue = if (serviceEnabled) PrimaryOrange else ErrorRed,
+        animationSpec = tween(260),
+        label = "header-badge-text"
+    )
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Box(
             modifier = Modifier
                 .clip(RoundedCornerShape(100.dp))
-                .background(OrangeDim)
-                .border(1.dp, OrangeGlow, RoundedCornerShape(100.dp))
+                .background(badgeBg)
+                .border(1.dp, badgeBorder, RoundedCornerShape(100.dp))
                 .padding(horizontal = 10.dp, vertical = 4.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                val infiniteTransition = rememberInfiniteTransition()
-                val pulseAlpha by infiniteTransition.animateFloat(
-                    initialValue = 1f, targetValue = 0f,
-                    animationSpec = infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse)
+                val pulseAlpha = if (serviceEnabled) {
+                    val infiniteTransition = rememberInfiniteTransition(label = "header-pulse")
+                    infiniteTransition.animateFloat(
+                        initialValue = 1f,
+                        targetValue = 0f,
+                        animationSpec = infiniteRepeatable(animation = tween(1000), repeatMode = RepeatMode.Reverse),
+                        label = "header-pulse-alpha"
+                    ).value
+                } else 1f
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background((if (serviceEnabled) PrimaryGreen else ErrorRed).copy(alpha = pulseAlpha))
                 )
-                Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(PrimaryGreen.copy(alpha = pulseAlpha)))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("ENFORCER V1.0", style = Typography.labelSmall.copy(color = PrimaryOrange, fontWeight = FontWeight.Bold))
+                AnimatedContent(
+                    targetState = serviceEnabled,
+                    transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(180)) },
+                    label = "header-badge-copy"
+                ) { active ->
+                    Text(
+                        if (active) "ENFORCER V1.0" else "ENFORCER OFF",
+                        style = Typography.labelSmall.copy(color = badgeTextColor, fontWeight = FontWeight.Bold)
+                    )
+                }
             }
         }
         Spacer(modifier = Modifier.height(10.dp))
@@ -663,7 +748,76 @@ fun HeaderSection() {
 }
 
 @Composable
+fun CollapsedToolbarOverlay(scrollY: Int, serviceEnabled: Boolean, modifier: Modifier = Modifier) {
+    val collapse = (scrollY / 220f).coerceIn(0f, 1f)
+    if (collapse < 0.02f) return
+    val alpha = ((collapse - 0.35f) / 0.65f).coerceIn(0f, 1f)
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .graphicsLayer { this.alpha = alpha },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(if (serviceEnabled) PrimaryOrange else ErrorRed)
+        )
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            "LeetCode Forcer",
+            style = Typography.titleLarge.copy(fontSize = 15.sp),
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            if (serviceEnabled) "Live" else "OFF",
+            style = Typography.labelSmall.copy(
+                color = if (serviceEnabled) SuccessGreen else ErrorRed,
+                fontWeight = FontWeight.Bold
+            )
+        )
+    }
+}
+
+@Composable
 fun ServiceStatusCard(enabled: Boolean, onEnable: () -> Unit) {
+    var prevEnabled by remember { mutableStateOf<Boolean?>(null) }
+    val morphT = remember { Animatable(if (enabled) 1f else 0f) }
+    val orbScale = remember { Animatable(1f) }
+    val pingProgress = remember { Animatable(0f) }
+    val rippleProgress = remember { Animatable(0f) }
+
+    LaunchedEffect(enabled) {
+        val previous = prevEnabled
+        prevEnabled = enabled
+        if (enabled) {
+            morphT.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
+            orbScale.snapTo(0.5f)
+            orbScale.animateTo(
+                1.1f,
+                spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+            )
+            orbScale.animateTo(
+                1f,
+                spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
+            )
+            if (previous == false || previous == null) {
+                pingProgress.snapTo(0f)
+                pingProgress.animateTo(1f, tween(700, easing = FastOutSlowInEasing))
+                pingProgress.snapTo(0f)
+                rippleProgress.snapTo(0f)
+                rippleProgress.animateTo(1f, tween(550, easing = FastOutSlowInEasing))
+                rippleProgress.snapTo(0f)
+            }
+        } else {
+            morphT.animateTo(0f, tween(200))
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -671,33 +825,53 @@ fun ServiceStatusCard(enabled: Boolean, onEnable: () -> Unit) {
             .background(SurfaceCard)
             .border(1.dp, BorderSubtle, RoundedCornerShape(20.dp))
             .drawBehind {
-                val color = if (enabled) PrimaryOrange.copy(0.08f) else ErrorRed.copy(0.08f)
+                val color = lerp(ErrorRed, PrimaryOrange, morphT.value).copy(alpha = 0.08f)
                 drawRect(Brush.radialGradient(listOf(color, Color.Transparent), center = Offset(0f, 0f), radius = size.width))
             }
             .padding(16.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            val color = if (enabled) PrimaryOrange else ErrorRed
-            val dimColor = if (enabled) OrangeDim else RedDim
+            val color = lerp(ErrorRed, PrimaryOrange, morphT.value)
+            val dimColor = lerp(RedDim, OrangeDim, morphT.value)
             
             Box(contentAlignment = Alignment.Center, modifier = Modifier.size(64.dp)) {
                 if (enabled) {
-                    val infiniteTransition = rememberInfiniteTransition()
+                    val infiniteTransition = rememberInfiniteTransition(label = "service-ring")
                     val scale by infiniteTransition.animateFloat(
                         initialValue = 1f, targetValue = 1.6f,
-                        animationSpec = infiniteRepeatable(animation = tween(2000), repeatMode = RepeatMode.Restart)
+                        animationSpec = infiniteRepeatable(animation = tween(2000), repeatMode = RepeatMode.Restart),
+                        label = "service-ring-scale"
                     )
                     val alpha by infiniteTransition.animateFloat(
                         initialValue = 0.4f, targetValue = 0f,
-                        animationSpec = infiniteRepeatable(animation = tween(2000), repeatMode = RepeatMode.Restart)
+                        animationSpec = infiniteRepeatable(animation = tween(2000), repeatMode = RepeatMode.Restart),
+                        label = "service-ring-alpha"
                     )
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        drawCircle(color = color, radius = (size.minDimension / 2.5f) * scale, style = Stroke(2.dp.toPx()), alpha = alpha)
+                        val baseRadius = size.minDimension / 2.5f
+                        if (pingProgress.value > 0f) {
+                            val progress = pingProgress.value
+                            drawCircle(
+                                color = PrimaryOrange.copy(alpha = 0.45f * (1f - progress)),
+                                radius = baseRadius * (1f + progress * 1.4f),
+                                style = Stroke(2.dp.toPx())
+                            )
+                        }
+                        if (rippleProgress.value > 0f) {
+                            val progress = rippleProgress.value
+                            drawCircle(
+                                color = PrimaryOrange.copy(alpha = 0.35f * (1f - progress)),
+                                radius = baseRadius * (1f + progress * 2.2f),
+                                style = Stroke(3.dp.toPx())
+                            )
+                        }
+                        drawCircle(color = PrimaryOrange, radius = baseRadius * scale, style = Stroke(2.dp.toPx()), alpha = alpha)
                     }
                 }
                 Box(
                     modifier = Modifier
                         .size(48.dp)
+                        .scale(orbScale.value)
                         .clip(CircleShape)
                         .background(dimColor)
                         .border(1.dp, color, CircleShape),
@@ -724,6 +898,42 @@ fun ServiceStatusCard(enabled: Boolean, onEnable: () -> Unit) {
 
 @Composable
 fun DailyProgressCard(statusText: String, streak: Int, solvedToday: Int, uniqueSolved: Int, heatmapData: List<Int>, isRefreshing: Boolean, onRefresh: () -> Unit) {
+    var lastSolvedToday by remember { mutableIntStateOf(solvedToday) }
+    var fillTodayTrigger by remember { mutableIntStateOf(0) }
+    var waveTrigger by remember { mutableIntStateOf(0) }
+    val todayFill = remember { Animatable(1f) }
+    val buttonInteraction = remember { MutableInteractionSource() }
+    val buttonPressed by buttonInteraction.collectIsPressedAsState()
+    val buttonScale by animateFloatAsState(
+        targetValue = if (buttonPressed) 0.97f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessHigh),
+        label = "progress-button-scale"
+    )
+    val spin = rememberInfiniteTransition(label = "refresh-spin")
+    val spinAngle by spin.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Restart),
+        label = "refresh-spin-angle"
+    )
+
+    LaunchedEffect(solvedToday) {
+        if (solvedToday > lastSolvedToday) {
+            fillTodayTrigger++
+            waveTrigger++
+        }
+        lastSolvedToday = solvedToday
+    }
+
+    LaunchedEffect(fillTodayTrigger) {
+        if (fillTodayTrigger <= 0) return@LaunchedEffect
+        todayFill.snapTo(0f)
+        todayFill.animateTo(
+            1f,
+            spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)
+        )
+    }
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -747,7 +957,16 @@ fun DailyProgressCard(statusText: String, streak: Int, solvedToday: Int, uniqueS
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(modifier = Modifier.weight(1.2f).height(120.dp).clip(RoundedCornerShape(12.dp)).background(SurfaceInner).padding(16.dp)) {
                     Column {
-                        Text("$streak", style = Typography.headlineLarge)
+                        AnimatedContent(
+                            targetState = streak,
+                            transitionSpec = {
+                                (slideInVertically { it / 2 } + fadeIn(tween(240)))
+                                    .togetherWith(fadeOut(tween(180)))
+                            },
+                            label = "streak-odometer"
+                        ) { currentStreak ->
+                            Text("$currentStreak", style = Typography.headlineLarge)
+                        }
                         Spacer(modifier = Modifier.weight(1f))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("\ud83d\udd25", fontSize = 14.sp)
@@ -765,31 +984,92 @@ fun DailyProgressCard(statusText: String, streak: Int, solvedToday: Int, uniqueS
             Spacer(modifier = Modifier.height(16.dp))
             LabelText("LAST 7 DAYS")
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                heatmapData.forEach { count ->
+                val todayIndex = (heatmapData.size - 1).coerceAtLeast(0)
+                heatmapData.forEachIndexed { index, count ->
                     val color = when {
                         count == 0 -> SurfaceInner
                         count >= 5 -> PrimaryOrange
                         else -> PrimaryOrange.copy(0.35f)
                     }
-                    Box(modifier = Modifier.weight(1f).height(36.dp).clip(RoundedCornerShape(6.dp)).background(color))
+                    val bounce = remember { Animatable(0f) }
+                    LaunchedEffect(waveTrigger) {
+                        if (waveTrigger <= 0) return@LaunchedEffect
+                        delay(index * 72L)
+                        bounce.animateTo(1f, tween(200))
+                        bounce.animateTo(
+                            0f,
+                            spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(36.dp)
+                            .scale(1f + bounce.value * 0.11f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(SurfaceInner)
+                    ) {
+                        val fillHeight = if (index == todayIndex) {
+                            if (count == 0) 0f else todayFill.value
+                        } else {
+                            if (count > 0) 1f else 0f
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .fillMaxHeight(fillHeight.coerceIn(0f, 1f))
+                                .align(Alignment.BottomCenter)
+                                .background(color)
+                        )
+                    }
                 }
             }
             
             Spacer(modifier = Modifier.height(20.dp))
+            AnimatedVisibility(visible = statusText.isNotBlank()) {
+                Text(
+                    text = statusText,
+                    style = Typography.labelSmall.copy(color = MutedText),
+                    modifier = Modifier.padding(bottom = 10.dp)
+                )
+            }
             Button(
                 onClick = onRefresh,
                 enabled = !isRefreshing,
-                modifier = Modifier.fillMaxWidth().height(42.dp),
+                modifier = Modifier.fillMaxWidth().height(42.dp).scale(buttonScale),
                 shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, PrimaryOrange),
-                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = PrimaryOrange)
+                border = BorderStroke(1.dp, if (isRefreshing) PrimaryOrange.copy(alpha = 0.5f) else PrimaryOrange),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent,
+                    contentColor = PrimaryOrange,
+                    disabledContainerColor = Color.Transparent,
+                    disabledContentColor = PrimaryOrange
+                ),
+                interactionSource = buttonInteraction,
+                contentPadding = PaddingValues()
             ) {
-                if (isRefreshing) {
-                    CircularProgressIndicator(modifier = Modifier.size(18.dp), color = PrimaryOrange, strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("CHECK FOR NEW SOLVES", style = Typography.bodyLarge.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold))
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    if (isRefreshing) {
+                        Canvas(modifier = Modifier.fillMaxSize().padding(2.dp)) {
+                            val strokeWidth = 2.dp.toPx()
+                            val pad = strokeWidth / 2f
+                            drawArc(
+                                color = PrimaryOrange,
+                                startAngle = spinAngle,
+                                sweepAngle = 100f,
+                                useCenter = false,
+                                topLeft = Offset(pad, pad),
+                                size = Size(size.width - strokeWidth, size.height - strokeWidth),
+                                style = Stroke(strokeWidth)
+                            )
+                        }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("CHECK FOR NEW SOLVES", style = Typography.bodyLarge.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold))
+                        }
+                    }
                 }
             }
         }
@@ -832,60 +1112,215 @@ fun SectionCard(title: String, subtitle: String, icon: ImageVector, iconColor: C
 }
 
 @Composable
-fun EnforcerInput(value: String, onValueChange: (String) -> Unit, placeholder: String, modifier: Modifier = Modifier, textAlign: TextAlign = TextAlign.Start) {
-    Box(
-        modifier = modifier
-            .height(44.dp)
-            .background(SurfaceInner, RoundedCornerShape(10.dp))
-            .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
-            .padding(horizontal = 12.dp),
-        contentAlignment = Alignment.CenterStart
-    ) {
-        if (value.isEmpty()) {
-            Text(placeholder, style = Typography.bodyLarge.copy(color = PlaceholderText), textAlign = textAlign, modifier = Modifier.fillMaxWidth())
+fun EnforcerInput(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    textAlign: TextAlign = TextAlign.Start,
+    saveSuccessKey: Int = 0
+) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val scanT by animateFloatAsState(
+        targetValue = if (focused) 1f else 0f,
+        animationSpec = tween(420, easing = FastOutSlowInEasing),
+        label = "input-scan"
+    )
+    var saveFlash by remember { mutableStateOf(false) }
+    var showCheck by remember { mutableStateOf(false) }
+    LaunchedEffect(saveSuccessKey) {
+        if (saveSuccessKey <= 0) return@LaunchedEffect
+        saveFlash = true
+        showCheck = true
+        delay(1200)
+        saveFlash = false
+        delay(300)
+        showCheck = false
+    }
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            saveFlash -> SuccessGreen
+            focused -> PrimaryOrange.copy(alpha = 0.85f)
+            else -> BorderSubtle
+        },
+        animationSpec = tween(280),
+        label = "input-border"
+    )
+    val inputBg by animateColorAsState(
+        targetValue = if (saveFlash) SuccessGreen.copy(alpha = 0.12f) else SurfaceInner,
+        animationSpec = tween(300),
+        label = "input-bg"
+    )
+
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(44.dp)
+                .background(inputBg, RoundedCornerShape(10.dp))
+                .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+                .drawWithContent {
+                    drawContent()
+                    val width = size.width
+                    val height = size.height
+                    val edge = 2.dp.toPx()
+                    val travel = (width - edge * 2) * scanT
+                    val t0 = (travel / width).coerceIn(0f, 1f)
+                    val t1 = ((travel + 24.dp.toPx()) / width).coerceIn(0f, 1f)
+                    val scanBrush = Brush.horizontalGradient(
+                        colorStops = arrayOf(
+                            0f to BorderSubtle,
+                            t0 to PrimaryOrange,
+                            t1 to BorderSubtle,
+                            1f to BorderSubtle
+                        )
+                    )
+                    drawRoundRect(
+                        brush = scanBrush,
+                        topLeft = Offset(0f, 0f),
+                        size = Size(width, edge * 2),
+                        cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx())
+                    )
+                    drawRoundRect(
+                        brush = scanBrush,
+                        topLeft = Offset(0f, height - edge * 2),
+                        size = Size(width, edge * 2),
+                        cornerRadius = CornerRadius(10.dp.toPx(), 10.dp.toPx())
+                    )
+                }
+                .padding(horizontal = 12.dp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            if (value.isEmpty()) {
+                Text(placeholder, style = Typography.bodyLarge.copy(color = PlaceholderText), textAlign = textAlign, modifier = Modifier.fillMaxWidth())
+            }
+            BasicTextField(
+                value = value,
+                onValueChange = onValueChange,
+                textStyle = Typography.bodyLarge.copy(textAlign = textAlign),
+                cursorBrush = SolidColor(PrimaryOrange),
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                interactionSource = interaction
+            )
         }
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            textStyle = Typography.bodyLarge.copy(textAlign = textAlign),
-            cursorBrush = SolidColor(PrimaryOrange),
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
+        AnimatedVisibility(visible = showCheck, modifier = Modifier.padding(start = 8.dp)) {
+            Icon(Icons.Default.Check, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(20.dp))
+        }
     }
 }
 
 @Composable
 fun EnforcerButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, isOutline: Boolean = false, isSmall: Boolean = false) {
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.97f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessHigh),
+        label = "button-scale"
+    )
+
     Button(
         onClick = onClick,
-        modifier = modifier.height(if (isSmall) 32.dp else 44.dp),
+        modifier = modifier.height(if (isSmall) 32.dp else 44.dp).scale(scale),
         shape = RoundedCornerShape(if (isSmall) 8.dp else 12.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = if (isOutline) Color.Transparent else PrimaryOrange,
             contentColor = if (isOutline) MutedText else Background
         ),
         border = if (isOutline) BorderStroke(1.dp, BorderSubtle) else null,
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+        interactionSource = interaction
     ) {
         Text(text, style = Typography.bodyLarge.copy(fontSize = if (isSmall) 10.sp else 12.sp, fontWeight = FontWeight.Bold))
     }
 }
 
 @Composable
-fun RuleItemComponent(pkg: String, badgeText: String, badgeColor: Color, badgeBg: Color, onRemove: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(SurfaceInner, RoundedCornerShape(10.dp))
-            .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
-            .padding(10.dp),
-        verticalAlignment = Alignment.CenterVertically
+fun RuleItemComponent(pkg: String, badgeText: String, badgeColor: Color, badgeBg: Color, listIndex: Int = 0, onRemove: () -> Unit) {
+    var visible by remember(pkg) { mutableStateOf(false) }
+    var removing by remember(pkg) { mutableStateOf(false) }
+    val pressScale = remember { Animatable(1f) }
+    var swipeOffset by remember(pkg) { mutableFloatStateOf(0f) }
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+
+    LaunchedEffect(pkg) {
+        delay(listIndex * 20L)
+        visible = true
+    }
+
+    AnimatedVisibility(
+        visible = visible && !removing,
+        enter = fadeIn(tween(280)) + slideInHorizontally { it / 2 },
+        exit = fadeOut(tween(220)) + androidx.compose.animation.slideOutHorizontally { it },
+        modifier = Modifier.animateContentSize(animationSpec = spring(stiffness = Spring.StiffnessMediumLow))
     ) {
-        Text(pkg, style = Typography.labelSmall.copy(color = BodyWhite, fontSize = 11.sp), modifier = Modifier.weight(1f))
-        StatusBadge(badgeText, badgeColor, badgeBg)
-        Spacer(modifier = Modifier.width(8.dp))
-        Icon(Icons.Default.Close, contentDescription = null, tint = MutedText, modifier = Modifier.size(16.dp).clickable { onRemove() })
+        Box(modifier = Modifier.fillMaxWidth()) {
+            val maxSwipe = with(density) { 160.dp.toPx() }
+            val reveal = (-swipeOffset / maxSwipe).coerceIn(0f, 1f)
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(ErrorRed.copy(alpha = 0.2f + reveal * 0.55f))
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Text("REMOVE", style = Typography.labelSmall.copy(color = BodyWhite, fontWeight = FontWeight.Bold))
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .offset { IntOffset(swipeOffset.roundToInt(), 0) }
+                    .scale(pressScale.value)
+                    .pointerInput(pkg) {
+                        detectHorizontalDragGestures(
+                            onDragEnd = {
+                                if (swipeOffset < -with(density) { 92.dp.toPx() }) {
+                                    scope.launch {
+                                        pressScale.animateTo(0.96f, tween(80))
+                                        swipeOffset = with(density) { 420.dp.toPx() }
+                                        delay(180)
+                                        removing = true
+                                        onRemove()
+                                    }
+                                } else {
+                                    swipeOffset = 0f
+                                }
+                            },
+                            onHorizontalDrag = { _, dx ->
+                                swipeOffset = (swipeOffset + dx).coerceIn(-maxSwipe, 0f)
+                            }
+                        )
+                    }
+                    .background(SurfaceInner, RoundedCornerShape(10.dp))
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
+                    .padding(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(pkg, style = Typography.labelSmall.copy(color = BodyWhite, fontSize = 11.sp), modifier = Modifier.weight(1f))
+                StatusBadge(badgeText, badgeColor, badgeBg)
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = null,
+                    tint = MutedText,
+                    modifier = Modifier
+                        .size(16.dp)
+                        .clickable {
+                            scope.launch {
+                                pressScale.animateTo(0.94f, tween(80))
+                                swipeOffset = with(density) { 420.dp.toPx() }
+                                delay(180)
+                                removing = true
+                                onRemove()
+                            }
+                        }
+                )
+            }
+        }
     }
 }
 
@@ -910,31 +1345,245 @@ fun StatTile(value: String, label: String, color: Color) {
 
 @Composable
 fun DayChip(label: String, active: Boolean, onClick: () -> Unit) {
+    val scale = remember { Animatable(1f) }
+    val chipBg by animateColorAsState(
+        targetValue = if (active) OrangeDim else SurfaceInner,
+        animationSpec = tween(180),
+        label = "chip-bg"
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (active) PrimaryOrange else Color.Transparent,
+        animationSpec = tween(180),
+        label = "chip-border"
+    )
+
     Box(
-        modifier = Modifier.size(38.dp).clip(RoundedCornerShape(8.dp))
-            .background(if (active) OrangeDim else SurfaceInner)
-            .border(1.dp, if (active) PrimaryOrange else Color.Transparent, RoundedCornerShape(8.dp))
-            .clickable { onClick() },
+        modifier = Modifier.size(38.dp).scale(scale.value).clip(RoundedCornerShape(8.dp))
+            .background(chipBg)
+            .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+            .clickable {
+                onClick()
+            },
         contentAlignment = Alignment.Center
     ) {
         Text(label, style = Typography.labelSmall.copy(color = if (active) PrimaryOrange else MutedText, fontWeight = FontWeight.Bold))
     }
+    LaunchedEffect(active) {
+        scale.snapTo(1f)
+        scale.animateTo(if (active) 1.15f else 0.95f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium))
+        scale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium))
+    }
 }
 
 @Composable
-fun SessionItemComponent(session: FocusSession, onRemove: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(SurfaceInner).padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text("${formatMinute(session.startMinute)} \u2192 ${formatMinute(session.endMinute)}", style = Typography.bodyLarge.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold))
-            Text(formatDays(session.days), style = Typography.labelSmall)
+fun AddScheduleMorphButton(onClick: () -> Unit, morphToCheckKey: Int, modifier: Modifier = Modifier) {
+    var showCheck by remember { mutableStateOf(false) }
+    LaunchedEffect(morphToCheckKey) {
+        if (morphToCheckKey > 0) {
+            showCheck = true
+            delay(600)
+            showCheck = false
         }
+    }
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.97f else 1f,
+        animationSpec = spring(stiffness = Spring.StiffnessHigh),
+        label = "add-session-scale"
+    )
+    Button(
+        onClick = onClick,
+        modifier = modifier.height(44.dp).scale(scale),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = PrimaryOrange, contentColor = Background),
+        interactionSource = interaction,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+    ) {
+        AnimatedContent(
+            targetState = showCheck,
+            transitionSpec = { fadeIn(tween(120)) togetherWith fadeOut(tween(120)) },
+            label = "add-session-morph"
+        ) { checked ->
+            if (checked) {
+                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp), tint = Background)
+            } else {
+                Text("ADD FOCUS SESSION", style = Typography.bodyLarge.copy(fontSize = 12.sp, fontWeight = FontWeight.Bold))
+            }
+        }
+    }
+}
+
+@Composable
+fun SwipeActivateControl(
+    text: String,
+    accentColor: Color,
+    accentBackground: Color,
+    onActivated: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var swipeOffset by remember { mutableFloatStateOf(0f) }
+    var isCompleting by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val maxTravelPx = with(density) { 220.dp.toPx() }
+    val thresholdPx = with(density) { 132.dp.toPx() }
+    val progress = (swipeOffset / maxTravelPx).coerceIn(0f, 1f)
+
+    val hintTransition = rememberInfiniteTransition(label = "swipe-hint")
+    val hintOffset by hintTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 18f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "swipe-hint-offset"
+    )
+
+    Box(
+        modifier = modifier
+            .height(52.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(SurfaceInner)
+            .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
+    ) {
         Box(
-            modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(RedDim).clickable { onRemove() }.padding(horizontal = 10.dp, vertical = 6.dp)
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(progress.coerceAtLeast(0.16f))
+                .clip(RoundedCornerShape(14.dp))
+                .background(accentBackground)
+        )
+
+        Row(
+            modifier = Modifier
+                .matchParentSize()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Remove", style = Typography.labelSmall.copy(color = ErrorRed, fontWeight = FontWeight.Bold))
+            Text(
+                text,
+                style = Typography.bodyLarge.copy(
+                    color = lerp(MutedText, accentColor, progress),
+                    fontWeight = FontWeight.Bold
+                ),
+                modifier = Modifier.weight(1f)
+            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.graphicsLayer { alpha = 1f - progress * 0.9f }
+            ) {
+                repeat(2) { index ->
+                    Icon(
+                        Icons.Default.ArrowForward,
+                        contentDescription = null,
+                        tint = accentColor.copy(alpha = 0.45f + 0.25f * index),
+                        modifier = Modifier
+                            .offset(x = (hintOffset * (index + 1) * 0.35f).dp)
+                            .size(16.dp)
+                    )
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .offset { IntOffset(swipeOffset.roundToInt(), 0) }
+                .padding(6.dp)
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(accentColor)
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            if (isCompleting) return@detectHorizontalDragGestures
+                            if (swipeOffset >= thresholdPx) {
+                                scope.launch {
+                                    isCompleting = true
+                                    swipeOffset = maxTravelPx
+                                    delay(120)
+                                    onActivated()
+                                    swipeOffset = 0f
+                                    isCompleting = false
+                                }
+                            } else {
+                                swipeOffset = 0f
+                            }
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            if (!isCompleting) {
+                                swipeOffset = (swipeOffset + dragAmount).coerceIn(0f, maxTravelPx)
+                            }
+                        }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.ArrowForward,
+                contentDescription = null,
+                tint = Background,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun SessionItemComponent(session: FocusSession, playSlideIn: Boolean = false, onRemove: () -> Unit) {
+    var visible by remember(session.id) { mutableStateOf(!playSlideIn) }
+    var collapsing by remember(session.id) { mutableStateOf(false) }
+    val removeGrow = remember { Animatable(1f) }
+    val redDeep = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(session.id, playSlideIn) {
+        if (playSlideIn) {
+            delay(40)
+            visible = true
+        } else {
+            visible = true
+        }
+    }
+
+    AnimatedVisibility(
+        visible = visible && !collapsing,
+        enter = fadeIn(tween(240)) + slideInVertically { it / 3 },
+        exit = androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(tween(200)),
+        modifier = Modifier.animateContentSize(animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(SurfaceInner)
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("${formatMinute(session.startMinute)} \u2192 ${formatMinute(session.endMinute)}", style = Typography.bodyLarge.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold))
+                Text(formatDays(session.days), style = Typography.labelSmall)
+            }
+            val pillBg = ErrorRed.copy(alpha = 0.12f + redDeep.value * 0.5f)
+            Box(
+                modifier = Modifier
+                    .scale(removeGrow.value)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(pillBg)
+                    .clickable {
+                        scope.launch {
+                            removeGrow.animateTo(1.12f, tween(100))
+                            redDeep.animateTo(1f, tween(140))
+                            collapsing = true
+                            delay(260)
+                            onRemove()
+                        }
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text("Remove", style = Typography.labelSmall.copy(color = ErrorRed, fontWeight = FontWeight.Bold))
+            }
         }
     }
 }
